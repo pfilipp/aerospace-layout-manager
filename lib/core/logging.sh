@@ -9,7 +9,7 @@ _ALM_LOGGING_LOADED=1
 
 # Log an informational message to stderr
 log() {
-    echo "[LAYOUT-DUMP] $*" >&2
+    echo "$*" >&2
 }
 
 # Log a debug message to stderr (only when DEBUG=1)
