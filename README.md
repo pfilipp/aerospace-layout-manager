@@ -5,6 +5,7 @@ Recreate AeroSpace window layouts from `dump-tree` JSON output. Save your window
 ## Requirements
 
 - [AeroSpace](https://github.com/nikitabobko/AeroSpace) window manager with `dump-tree` command support
+  - **Note**: The `dump-tree` command is currently only available in [pfilipp/AeroSpace fork](https://github.com/pfilipp/AeroSpace)
 - Bash 4.0+
 - [jq](https://stedolan.github.io/jq/) for JSON parsing
 
