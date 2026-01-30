@@ -1,0 +1,48 @@
+[
+  {
+    "name": "main",
+    "type": "workspace",
+    "root-container": {
+      "type": "container",
+      "layout": "h_accordion",
+      "orientation": "horizontal",
+      "children": [
+        {
+          "type": "window",
+          "app-bundle-id": "com.microsoft.VSCode",
+          "app-name": "Code",
+          "title": "my-project",
+          "window-id": 1
+        },
+        {
+          "type": "window",
+          "app-bundle-id": "com.apple.Safari",
+          "app-name": "Safari",
+          "title": "",
+          "window-id": 2
+        },
+        {
+          "type": "container",
+          "layout": "v_tiles",
+          "orientation": "vertical",
+          "children": [
+            {
+              "type": "window",
+              "app-bundle-id": "com.googlecode.iterm2",
+              "app-name": "iTerm2",
+              "title": "shell",
+              "window-id": 3
+            },
+            {
+              "type": "window",
+              "app-bundle-id": "com.googlecode.iterm2",
+              "app-name": "iTerm2",
+              "title": "logs",
+              "window-id": 4
+            }
+          ]
+        }
+      ]
+    }
+  }
+]
