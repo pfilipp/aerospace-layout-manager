@@ -15,7 +15,8 @@ set -euo pipefail
 # =============================================================================
 
 # Determine script location and source library modules
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Use readlink -f to resolve symlinks, so lib/ is found even when script is symlinked
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 LIB_DIR="$(cd "$SCRIPT_DIR/../lib" && pwd)"
 
 # Source all modules
