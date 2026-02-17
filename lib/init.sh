@@ -34,6 +34,7 @@ source "$_ALM_LIB_DIR/tree/traversal.sh"
 
 # Window modules (depend on core, aerospace/commands)
 source "$_ALM_LIB_DIR/window/matching.sh"
+source "$_ALM_LIB_DIR/window/startup.sh"
 source "$_ALM_LIB_DIR/window/discovery.sh"
 source "$_ALM_LIB_DIR/window/movement.sh"
 

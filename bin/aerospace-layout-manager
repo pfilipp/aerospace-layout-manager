@@ -31,12 +31,27 @@ main() {
 
     local target_workspace=""
     local json_input=""
+    ALLOW_MISSING=0
 
-    # Parse arguments
+    # Parse flags
+    while [[ $# -gt 0 && "$1" == --* ]]; do
+        case "$1" in
+            --allow-missing)
+                ALLOW_MISSING=1
+                shift
+                ;;
+            *)
+                error "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    # Parse positional arguments
     if [[ $# -lt 1 ]]; then
-        echo "Usage: $0 <target_workspace> [json_file]"
-        echo "       $0 <target_workspace> < dump.json"
-        echo "       aerospace dump-tree --workspace X | $0 <target_workspace>"
+        echo "Usage: $0 [--allow-missing] <target_workspace> [json_file]"
+        echo "       $0 [--allow-missing] <target_workspace> < dump.json"
+        echo "       aerospace dump-tree --workspace X | $0 [--allow-missing] <target_workspace>"
         exit 1
     fi
 

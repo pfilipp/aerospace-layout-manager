@@ -1,0 +1,25 @@
+#!/bin/bash
+# =============================================================================
+# safari-profile: Open a new Safari window in a named profile
+#
+# Usage:
+#   safari-profile Personal    # Opens Safari in the "Personal" profile
+#   safari-profile Work        # Opens Safari in the "Work" profile
+#
+# Safari profiles can't be opened via CLI flags, so this uses AppleScript
+# to navigate File > New Window > New <Profile> Window via System Events.
+# =============================================================================
+
+set -euo pipefail
+
+profile="${1:?Usage: safari-profile <profile-name>}"
+
+osascript <<EOF
+tell application "Safari" to activate
+delay 0.3
+tell application "System Events"
+    tell process "Safari"
+        click menu item "New ${profile} Window" of menu "File" of menu bar 1
+    end tell
+end tell
+EOF

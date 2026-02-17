@@ -12,14 +12,16 @@
           "app-bundle-id": "com.microsoft.VSCode",
           "app-name": "Code",
           "title": "my-project",
-          "window-id": 1
+          "window-id": 1,
+          "startup": "code ~/Projects/my-project"
         },
         {
           "type": "window",
           "app-bundle-id": "com.apple.Safari",
           "app-name": "Safari",
           "title": "",
-          "window-id": 2
+          "window-id": 2,
+          "startup": "open -b com.apple.Safari https://localhost:3000"
         },
         {
           "type": "container",
@@ -31,14 +33,16 @@
               "app-bundle-id": "com.googlecode.iterm2",
               "app-name": "iTerm2",
               "title": "shell",
-              "window-id": 3
+              "window-id": 3,
+              "startup": "iterm-open 'cd ~/Projects/my-project'"
             },
             {
               "type": "window",
               "app-bundle-id": "com.googlecode.iterm2",
               "app-name": "iTerm2",
               "title": "logs",
-              "window-id": 4
+              "window-id": 4,
+              "startup": "iterm-open 'cd ~/Projects/my-project && npm run dev'"
             }
           ]
         }
