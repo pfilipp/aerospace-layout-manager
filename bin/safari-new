@@ -1,0 +1,20 @@
+#!/bin/bash
+# =============================================================================
+# safari-new: Open a new Safari window (default profile)
+#
+# Usage:
+#   safari-new
+#
+# Unlike `open -b com.apple.Safari` which just activates an existing window,
+# this creates a brand new Safari window using AppleScript.
+# =============================================================================
+
+set -euo pipefail
+
+osascript <<EOF
+tell application "Safari" to activate
+delay 0.3
+tell application "Safari"
+    make new document
+end tell
+EOF
