@@ -11,7 +11,7 @@
 _ALM_WINDOW_STARTUP_LOADED=1
 
 # Execute a startup command for a missing window
-# Prepends the project's bin/ dir to PATH so helpers like iterm-open are found
+# Prepends the project's bin/ dir to PATH so helpers like safari-profile are found
 # Args: startup_cmd, bundle_id, title
 # Returns: 0 on success, 1 on failure
 execute_startup_command() {
@@ -21,7 +21,7 @@ execute_startup_command() {
 
     debug "Executing startup command for $bundle_id '$title': $startup_cmd"
 
-    # Prepend project's bin/ dir to PATH so helpers like iterm-open are found
+    # Prepend project's bin/ dir to PATH so helpers like safari-profile are found
     local project_bin
     project_bin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin"
     local original_path="$PATH"

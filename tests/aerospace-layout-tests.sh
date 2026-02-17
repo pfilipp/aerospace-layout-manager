@@ -54,15 +54,15 @@ log_verbose() {
     fi
 }
 
-# Get current workspace tree as JSON using dump-tree
+# Get current workspace tree as JSON using tree
 get_tree() {
-    aerospace dump-tree --workspace "$TEST_WS" 2>/dev/null
+    aerospace tree --workspace "$TEST_WS" 2>/dev/null
 }
 
 # Get focused workspace tree
 get_workspace_tree() {
     local ws="${1:-$TEST_WS}"
-    aerospace dump-tree --workspace "$ws" 2>/dev/null
+    aerospace tree --workspace "$ws" 2>/dev/null
 }
 
 # Pretty print tree for debugging
@@ -71,7 +71,7 @@ print_tree() {
     get_workspace_tree | jq -r '.' 2>/dev/null || echo "Failed to get tree"
 }
 
-# Get the root container layout from dump-tree output
+# Get the root container layout from tree output
 get_root_layout() {
     get_workspace_tree | jq -r '.[0]."root-container".layout // "unknown"' 2>/dev/null
 }
@@ -258,7 +258,7 @@ test_1_0_workspace_memory() {
     aerospace workspace "$TEST_WS"
     sleep 0.3
 
-    # Check layout using dump-tree
+    # Check layout using tree
     local layout
     layout=$(get_root_layout)
 

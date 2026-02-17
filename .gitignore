@@ -1,0 +1,10 @@
+# Personal layout files
+layouts/
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~

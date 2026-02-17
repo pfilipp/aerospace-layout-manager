@@ -1,7 +1,7 @@
-# Layout Recreation from Dump-Tree - Development Notes
+# Layout Recreation from Tree - Development Notes
 
 ## Goal
-Recreate exact window layouts from `aerospace dump-tree` JSON output.
+Recreate exact window layouts from `aerospace tree` JSON output.
 
 ## Test Case
 ```
@@ -279,7 +279,7 @@ Use `move` to add more windows.
 ## Final Working Algorithm
 
 ```
-1. Parse dump-tree JSON, create window mapping (original_id → new_id)
+1. Parse tree JSON, create window mapping (original_id → new_id)
 2. Move all windows to temp workspace
 3. Move all windows to target workspace in DFS order
 4. Flatten workspace, set root layout
@@ -315,7 +315,7 @@ aerospace layout <h_tiles|v_tiles|h_accordion|v_accordion>
 aerospace focus --window-id <id>
 aerospace move-node-to-workspace --window-id <id> <workspace>
 aerospace list-windows --workspace <name> --format '%{window-id}|%{app-name}'
-aerospace dump-tree --workspace <name>
+aerospace tree --workspace <name>
 ```
 
 ---

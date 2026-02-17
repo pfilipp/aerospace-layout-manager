@@ -8,7 +8,7 @@ Apply AeroSpace window layouts from JSON. Save arrangements, apply with one comm
 - Bash 4.0+
 - [jq](https://stedolan.github.io/jq/)
 
-**Optional**: [pfilipp/AeroSpace fork](https://github.com/pfilipp/AeroSpace) adds the `dump-tree` command to export existing layouts to JSON. Without it, you'll need to write layout files manually.
+**Optional**: [pfilipp/AeroSpace fork](https://github.com/pfilipp/AeroSpace) adds the `tree` command to export existing layouts to JSON (proposed for upstream inclusion). Without it, you'll need to write layout files manually.
 
 ## Installation
 
@@ -36,10 +36,10 @@ git clone https://github.com/pfilipp/aerospace-layout-manager.git
 cp aerospace-layout-manager/bin/aerospace-layout-manager ~/.local/bin/
 chmod +x ~/.local/bin/aerospace-layout-manager
 
-# Optional helpers for startup commands
-cp aerospace-layout-manager/bin/iterm-open ~/.local/bin/
+# Optional helpers for startup commands (only needed if you use them in your layouts)
 cp aerospace-layout-manager/bin/safari-profile ~/.local/bin/
-chmod +x ~/.local/bin/iterm-open ~/.local/bin/safari-profile
+cp aerospace-layout-manager/bin/safari-new ~/.local/bin/
+chmod +x ~/.local/bin/safari-profile ~/.local/bin/safari-new
 ```
 
 ## Usage
@@ -51,8 +51,8 @@ aerospace-layout-manager <workspace> <layout.json>
 # From stdin
 aerospace-layout-manager <workspace> < layout.json
 
-# Pipe from dump-tree
-aerospace dump-tree --workspace src | aerospace-layout-manager dest
+# Pipe from tree
+aerospace tree --workspace src | aerospace-layout-manager dest
 ```
 
 ### Flags
@@ -73,7 +73,7 @@ aerospace dump-tree --workspace src | aerospace-layout-manager dest
 
 ## JSON Structure
 
-The layout JSON is an array with one workspace object:
+The layout JSON is an array with one workspace object. Extra fields from `tree` output (like `app-name`, `orientation`) are ignored and can be left in.
 
 ```json
 [
@@ -281,26 +281,16 @@ Common patterns:
 "startup": "code ~/Projects/my-project"
 "startup": "open ~/Documents/notes.md"
 
+// Open a terminal
+"startup": "open -a iTerm"
+
 // Use a bundled helper (see below)
-"startup": "iterm-open 'cd ~/Projects/my-project && npm run dev'"
 "startup": "safari-profile Work"
 ```
 
-### Bundled helpers
+### Bundled helpers (optional)
 
-The `bin/` directory is automatically added to `PATH` when startup commands run, so bundled helpers are available without a full path.
-
-#### `iterm-open`
-
-Opens a new iTerm2 window, optionally running a command. The shell stays open after the command finishes.
-
-```bash
-iterm-open                                # New default iTerm window
-iterm-open 'cd ~/Projects && ls'          # Run command, keep shell
-iterm-open 'npm run dev'                  # Start a process, keep shell
-```
-
-Uses AppleScript to create the window, so iTerm2 must be running or will be launched.
+These helpers are included in `bin/` for convenience — you don't need to install them unless your layouts use them. The `bin/` directory is automatically added to `PATH` when startup commands run, so bundled helpers are available without a full path.
 
 #### `safari-profile`
 
@@ -309,6 +299,14 @@ Opens a new Safari window in a named profile. Safari doesn't support profile sel
 ```bash
 safari-profile Personal
 safari-profile Work
+```
+
+#### `safari-new`
+
+Opens a new Safari window. Unlike `open -b com.apple.Safari` which activates an existing window, this creates a fresh one via AppleScript.
+
+```bash
+safari-new
 ```
 
 ### Tuning poll behavior
@@ -353,13 +351,13 @@ A layout that sets up a dev workspace with an editor, browser, and two terminals
               "type": "window",
               "app-bundle-id": "com.googlecode.iterm2",
               "title": "shell",
-              "startup": "iterm-open 'cd ~/Projects/my-project'"
+              "startup": "open -a iTerm"
             },
             {
               "type": "window",
               "app-bundle-id": "com.googlecode.iterm2",
               "title": "logs",
-              "startup": "iterm-open 'cd ~/Projects/my-project && npm run dev'"
+              "startup": "open -a iTerm"
             }
           ]
         }
@@ -380,6 +378,8 @@ h_tiles
 
 Running `aerospace-layout-manager dev layout.json` will find or launch each window, then arrange them into this layout.
 
+> **Tip**: The startup commands above use basic `open -a` invocations. If you need app-specific launch behavior (e.g., opening iTerm with a particular command, or launching a specific VS Code workspace), write your own helper scripts and place them in the `bin/` directory — they'll be available to startup commands automatically.
+
 ### Writing your own helpers
 
 You can add custom helpers to the project's `bin/` directory. They'll be available to startup commands automatically. A helper should:
@@ -392,6 +392,8 @@ You can add custom helpers to the project's `bin/` directory. They'll be availab
 
 - Unmatched windows without a `startup` command cause errors (use `--allow-missing` to skip them)
 - Works best with same apps running as when saved, though `startup` can fill in gaps
+- **Duplicate window matching**: When multiple JSON entries share the same `app-bundle-id` and empty `title`, the engine may match the same physical window for both. Workaround: give each window a distinct `title`, or use `source-workspace` to restrict matching to a specific workspace.
+- **Layout ordering in complex nesting**: In some deeply nested layouts, layout types may be applied to the wrong container level. This is a known issue being investigated.
 
 ## How It Works
 

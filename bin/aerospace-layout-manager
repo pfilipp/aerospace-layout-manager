@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# AeroSpace Layout from Dump-Tree
-# Recreates a layout from aerospace dump-tree JSON output
+# AeroSpace Layout Manager
+# Recreates a layout from aerospace tree JSON output
 #
 # Usage:
-#   ./aerospace-layout-from-dump.sh <workspace> <json_file>
-#   ./aerospace-layout-from-dump.sh <workspace> < dump.json
-#   aerospace dump-tree --workspace temp | ./aerospace-layout-from-dump.sh <workspace>
+#   ./aerospace-layout-manager <workspace> <json_file>
+#   ./aerospace-layout-manager <workspace> < layout.json
+#   aerospace tree --workspace temp | ./aerospace-layout-manager <workspace>
 
 set -euo pipefail
 
@@ -51,7 +51,7 @@ main() {
     if [[ $# -lt 1 ]]; then
         echo "Usage: $0 [--allow-missing] <target_workspace> [json_file]"
         echo "       $0 [--allow-missing] <target_workspace> < dump.json"
-        echo "       aerospace dump-tree --workspace X | $0 [--allow-missing] <target_workspace>"
+        echo "       aerospace tree --workspace X | $0 [--allow-missing] <target_workspace>"
         exit 1
     fi
 

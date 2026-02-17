@@ -34,7 +34,7 @@
               "app-name": "iTerm2",
               "title": "shell",
               "window-id": 3,
-              "startup": "iterm-open 'cd ~/Projects/my-project'"
+              "startup": "open -a iTerm"
             },
             {
               "type": "window",
@@ -42,7 +42,7 @@
               "app-name": "iTerm2",
               "title": "logs",
               "window-id": 4,
-              "startup": "iterm-open 'cd ~/Projects/my-project && npm run dev'"
+              "startup": "open -a iTerm"
             }
           ]
         }
