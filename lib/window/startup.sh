@@ -27,7 +27,7 @@ execute_startup_command() {
     local original_path="$PATH"
     export PATH="$project_bin:$PATH"
 
-    if eval "$startup_cmd" 2>/dev/null; then
+    if eval "$startup_cmd" > /dev/null 2>/dev/null; then
         export PATH="$original_path"
         debug "Startup command succeeded for $bundle_id '$title'"
         return 0
