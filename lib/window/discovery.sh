@@ -105,7 +105,7 @@ create_window_mapping() {
 
             # Poll for the new window
             local new_id
-            new_id=$(poll_for_new_window "$bundle_id" "$before_snapshot")
+            new_id=$(poll_for_new_window "$bundle_id" "$before_snapshot" "$title")
 
             if [[ -n "$new_id" ]]; then
                 log "  Launched: $bundle_id '$title' -> $new_id"

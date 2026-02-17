@@ -48,16 +48,18 @@ snapshot_staging_windows() {
     # Switch to the staging workspace
     aerospace_workspace "$STARTUP_WORKSPACE"
 
-    # List all window IDs in the staging workspace for this bundle_id
-    aerospace_list_windows --workspace "$STARTUP_WORKSPACE" --app-bundle-id "$bundle_id" --format "%{window-id}"
+    # List all window IDs across all monitors for this bundle_id
+    aerospace_list_windows --monitor all --app-bundle-id "$bundle_id" --format "%{window-id}"
 }
 
-# Poll for a new window in the staging workspace by diffing against a before snapshot
-# Args: bundle_id, before_snapshot (newline-separated window IDs)
+# Poll for a new window by diffing all monitors against a before snapshot
+# If title is provided, matches among new windows; otherwise takes first new window
+# Args: bundle_id, before_snapshot (newline-separated window IDs), title (optional)
 # Outputs: the new window-id on stdout (empty string on timeout)
 poll_for_new_window() {
     local bundle_id="$1"
     local before_snapshot="$2"
+    local title="$3"
 
     local elapsed=0
 
@@ -65,21 +67,58 @@ poll_for_new_window() {
         sleep "$STARTUP_POLL_INTERVAL"
         elapsed=$(( elapsed + STARTUP_POLL_INTERVAL ))
 
-        # Get current windows in the staging workspace
+        # Get current windows across all monitors
         local current_windows
-        current_windows=$(aerospace_list_windows --workspace "$STARTUP_WORKSPACE" --app-bundle-id "$bundle_id" --format "%{window-id}")
+        current_windows=$(aerospace_list_windows --monitor all --app-bundle-id "$bundle_id" --format "%{window-id}")
 
         # Find new window IDs by diffing
-        local new_id
-        new_id=$(comm -23 <(echo "$current_windows" | sort) <(echo "$before_snapshot" | sort) | head -1)
+        local new_ids
+        new_ids=$(comm -23 <(echo "$current_windows" | sort) <(echo "$before_snapshot" | sort))
 
-        if [[ -n "$new_id" ]]; then
-            debug "Found new window $new_id after ${elapsed}s"
+        if [[ -z "$new_ids" ]]; then
+            debug "Polling for new window ($elapsed/${STARTUP_POLL_TIMEOUT}s)..."
+            continue
+        fi
+
+        # If no title to match, return first new window
+        if [[ -z "$title" ]]; then
+            local new_id
+            new_id=$(echo "$new_ids" | head -1)
+            debug "Found new window $new_id (no title filter) after ${elapsed}s"
             echo "$new_id"
             return 0
         fi
 
-        debug "Polling for new window ($elapsed/${STARTUP_POLL_TIMEOUT}s)..."
+        # Title matching among new windows
+        for new_id in $new_ids; do
+            local win_title
+            win_title=$(aerospace_list_windows --monitor all --app-bundle-id "$bundle_id" --format "%{window-id}|%{window-title}" \
+                | grep "^${new_id}|" | cut -d'|' -f2-)
+
+            # Exact match
+            if [[ "$win_title" == "$title" ]]; then
+                debug "Found new window $new_id (exact title match) after ${elapsed}s"
+                echo "$new_id"
+                return 0
+            fi
+            # Substring match
+            if [[ "$win_title" == *"$title"* ]]; then
+                debug "Found new window $new_id (substring title match) after ${elapsed}s"
+                echo "$new_id"
+                return 0
+            fi
+            # Case-insensitive substring
+            local title_lower win_title_lower
+            title_lower=$(echo "$title" | tr '[:upper:]' '[:lower:]')
+            win_title_lower=$(echo "$win_title" | tr '[:upper:]' '[:lower:]')
+            if [[ "$win_title_lower" == *"$title_lower"* ]]; then
+                debug "Found new window $new_id (case-insensitive match) after ${elapsed}s"
+                echo "$new_id"
+                return 0
+            fi
+        done
+
+        debug "New windows found but no title match yet ($elapsed/${STARTUP_POLL_TIMEOUT}s)..."
     done
 
     debug "Timeout waiting for new window from $bundle_id"
