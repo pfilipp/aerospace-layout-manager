@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Determine the web/ project root relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WEB_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+PORT=3847
+HEALTH_URL="http://localhost:${PORT}/api/health"
+APP_URL="http://localhost:${PORT}"
+SERVER_PID=""
+
+cleanup() {
+  echo ""
+  echo "Stopping server..."
+  if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+  echo "Server stopped."
+  exit 0
+}
+
+trap cleanup SIGINT SIGTERM
+
+echo "Starting server..."
+
+# Detect mode: if dist/ contains built server output, run production; otherwise dev
+if [[ -f "$WEB_DIR/dist/server/index.js" ]]; then
+  cd "$WEB_DIR"
+  NODE_ENV=production node dist/server/index.js &
+  SERVER_PID=$!
+else
+  cd "$WEB_DIR"
+  npm run dev &
+  SERVER_PID=$!
+fi
+
+# Poll health endpoint until ready (30 second timeout)
+TIMEOUT=30
+ELAPSED=0
+INTERVAL=1
+
+while (( ELAPSED < TIMEOUT )); do
+  if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
+    echo "Server ready."
+    echo "Opening browser..."
+    open "$APP_URL"
+    break
+  fi
+  sleep "$INTERVAL"
+  ELAPSED=$(( ELAPSED + INTERVAL ))
+done
+
+if (( ELAPSED >= TIMEOUT )); then
+  echo "Error: server did not become ready within ${TIMEOUT} seconds."
+  cleanup
+  exit 1
+fi
+
+# Block until the server process exits or Ctrl+C is received
+wait "$SERVER_PID"
