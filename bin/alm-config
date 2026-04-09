@@ -273,28 +273,127 @@ _project_add() {
     echo "Project '$name' added." >&2
 }
 
+# Display project summary for editing
+_project_summary() {
+    local json="$1"
+    local name dir subdir iterm_cmd xcodeproj apps_display
+    name=$(echo "$json" | jq -r '.name')
+    dir=$(echo "$json" | jq -r '.dir // ""')
+    subdir=$(echo "$json" | jq -r '.subdir // ""')
+    iterm_cmd=$(echo "$json" | jq -r '.iterm_cmd // ""')
+    xcodeproj=$(echo "$json" | jq -r '.xcodeproj // ""')
+    apps_display=$(echo "$json" | jq -r '.apps[]' 2>/dev/null | while read -r bid; do
+        _app_display_name "$bid"
+    done | paste -sd ', ' -)
+
+    printf '\n' >&2
+    _bold "  Project: $name" >&2
+    printf '\n' >&2
+    printf '  %-16s %s\n' "Directory:" "${dir:-$(_dim "(empty)")}" >&2
+    printf '  %-16s %s\n' "Subdirectory:" "${subdir:-$(_dim "(empty)")}" >&2
+    printf '  %-16s %s\n' "iTerm command:" "${iterm_cmd:-$(_dim "(empty)")}" >&2
+    printf '  %-16s %s\n' "Xcode project:" "${xcodeproj:-$(_dim "(empty)")}" >&2
+    printf '  %-16s %s\n' "Apps:" "${apps_display:-$(_dim "(none)")}" >&2
+    printf '\n' >&2
+}
+
 # Edit an existing project
 _project_edit() {
     local name="$1"
 
-    local existing_json
-    existing_json=$(project_get "$name") || {
+    local project_json
+    project_json=$(project_get "$name") || {
         echo "[ERROR] Project '$name' not found" >&2
         return 1
     }
 
-    echo "" >&2
-    _bold "  Edit Project: $name" >&2
-    echo "" >&2
+    _project_summary "$project_json"
 
-    local project_json
-    project_json=$(_prompt_project "$name" "$existing_json") || return 1
+    local dir subdir iterm_cmd xcodeproj
+    dir=$(echo "$project_json" | jq -r '.dir // ""')
+    subdir=$(echo "$project_json" | jq -r '.subdir // ""')
+    iterm_cmd=$(echo "$project_json" | jq -r '.iterm_cmd // ""')
+    xcodeproj=$(echo "$project_json" | jq -r '.xcodeproj // ""')
+
+    local choice
+    choice=$(printf '%s\n' \
+        "Directory        [$dir]" \
+        "Subdirectory     [${subdir:-(empty)}]" \
+        "iTerm command    [${iterm_cmd:-(empty)}]" \
+        "Xcode project    [${xcodeproj:-(empty)}]" \
+        "Apps             [select]" | \
+        fzf --header="Select field to modify (ESC to cancel)" \
+            --prompt="Field> " \
+            --height=~40% \
+            --reverse \
+            --no-sort 2>/dev/tty) || { echo "Cancelled." >&2; return 0; }
+
+    case "$choice" in
+        Directory*)
+            printf "New directory: " >&2
+            read -r dir < /dev/tty
+            if [[ -z "$dir" ]]; then
+                echo "[ERROR] Directory cannot be empty" >&2
+                return 1
+            fi
+            local expanded_dir="${dir/#\~/$HOME}"
+            if [[ ! -d "$expanded_dir" ]]; then
+                echo "[ERROR] Directory does not exist: $dir" >&2
+                return 1
+            fi
+            project_json=$(echo "$project_json" | jq --arg v "$dir" '.dir = $v')
+            ;;
+        Subdirectory*)
+            printf "New subdirectory (enter '-' to clear): " >&2
+            read -r subdir < /dev/tty
+            [[ "$subdir" == "-" ]] && subdir=""
+            project_json=$(echo "$project_json" | jq --arg v "$subdir" '.subdir = $v')
+            ;;
+        "iTerm command"*)
+            printf "New iTerm command (enter '-' to clear): " >&2
+            read -r iterm_cmd < /dev/tty
+            [[ "$iterm_cmd" == "-" ]] && iterm_cmd=""
+            project_json=$(echo "$project_json" | jq --arg v "$iterm_cmd" '.iterm_cmd = $v')
+            ;;
+        "Xcode project"*)
+            printf "New Xcode project filename (enter '-' to clear): " >&2
+            read -r xcodeproj < /dev/tty
+            [[ "$xcodeproj" == "-" ]] && xcodeproj=""
+            project_json=$(echo "$project_json" | jq --arg v "$xcodeproj" '.xcodeproj = $v')
+            ;;
+        Apps*)
+            echo "Select apps (TAB to toggle, ENTER to confirm):" >&2
+            local selected_apps
+            selected_apps=$(printf '%s\n' "${KNOWN_APP_NAMES[@]}" | fzf --multi \
+                --header="Select apps for $name (TAB to toggle)" \
+                --prompt="Apps> " \
+                --height=~40% \
+                --reverse \
+                --no-sort 2>/dev/tty) || { echo "Cancelled." >&2; return 0; }
+
+            if [[ -z "$selected_apps" ]]; then
+                echo "[ERROR] At least one app must be selected" >&2
+                return 1
+            fi
+
+            local apps_json="["
+            local first=true
+            while IFS= read -r app_name; do
+                local bundle_id="${KNOWN_APPS[$app_name]}"
+                if [[ -n "$bundle_id" ]]; then
+                    [[ "$first" == "true" ]] && first=false || apps_json+=","
+                    apps_json+="\"$bundle_id\""
+                fi
+            done <<< "$selected_apps"
+            apps_json+="]"
+
+            project_json=$(echo "$project_json" | jq --argjson v "$apps_json" '.apps = $v')
+            ;;
+    esac
 
     project_set "$name" "$project_json"
     echo "" >&2
     echo "Project '$name' updated." >&2
-
-    # Regenerate layouts for any workspace using this project
     _regenerate_for_project "$name"
 }
 
