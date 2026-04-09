@@ -1,0 +1,599 @@
+#!/bin/bash
+# =============================================================================
+# alm-config -- TUI configurator for AeroSpace Layout Manager
+#
+# Interactive fzf-based menu system for managing project-to-workspace
+# bindings and generating resolved layout JSONs.
+#
+# Usage:
+#   alm-config              Launch interactive TUI
+#   alm-config status       Print workspace bindings table
+#   alm-config list         Same as status
+#   alm-config regenerate   Regenerate all layout JSONs
+#   alm-config generate <workspace>  Regenerate layout for one workspace
+#   alm-config --help       Display usage information
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# INITIALIZATION
+# =============================================================================
+
+# Resolve script location (follows symlinks so lib/ is found even when symlinked)
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+LIB_DIR="$(cd "$SCRIPT_DIR/../lib" && pwd)"
+
+# Source data access layer and generation engine
+source "$LIB_DIR/config/data.sh"
+source "$LIB_DIR/config/generate.sh"
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Configurable workspaces
+CONFIGURABLE_WORKSPACES=("code" "code2" "code3" "homelab")
+
+# Known apps registry
+declare -A KNOWN_APPS=(
+    ["VS Code"]="com.microsoft.VSCode"
+    ["iTerm2"]="com.googlecode.iterm2"
+    ["Xcode"]="com.apple.dt.Xcode"
+    ["Safari"]="com.apple.Safari"
+    ["Brave"]="com.brave.Browser"
+    ["Slack"]="com.tinyspeck.slackmacgap"
+    ["Figma"]="com.figma.Desktop"
+    ["Claude"]="com.anthropic.claudefordesktop"
+)
+
+# Sorted app names for consistent display
+KNOWN_APP_NAMES=(
+    "Brave"
+    "Claude"
+    "Figma"
+    "iTerm2"
+    "Safari"
+    "Slack"
+    "VS Code"
+    "Xcode"
+)
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+# Print colored text
+_green()  { printf '\033[32m%s\033[0m' "$1"; }
+_yellow() { printf '\033[33m%s\033[0m' "$1"; }
+_red()    { printf '\033[31m%s\033[0m' "$1"; }
+_bold()   { printf '\033[1m%s\033[0m' "$1"; }
+_dim()    { printf '\033[2m%s\033[0m' "$1"; }
+
+# Get the display name for a bundle ID
+_app_display_name() {
+    local bundle_id="$1"
+    for name in "${KNOWN_APP_NAMES[@]}"; do
+        if [[ "${KNOWN_APPS[$name]}" == "$bundle_id" ]]; then
+            echo "$name"
+            return
+        fi
+    done
+    echo "$bundle_id"
+}
+
+# =============================================================================
+# STATUS / LIST
+# =============================================================================
+
+print_status() {
+    config_init
+
+    printf '\n'
+    _bold "  Workspace Bindings"
+    printf '\n'
+    printf '  %-12s %-20s %-8s %s\n' "WORKSPACE" "PROJECT" "ACTIVE" "LAYOUTS"
+    printf '  %-12s %-20s %-8s %s\n' "---------" "-------" "------" "-------"
+
+    for ws in "${CONFIGURABLE_WORKSPACES[@]}"; do
+        local project active dual_exists avp_exists layout_status
+
+        project=$(workspace_get "$ws")
+        active=$(jq -r --arg ws "$ws" '.workspaces[$ws].active // true' "$ALM_PROJECTS_FILE" 2>/dev/null)
+
+        if [[ -z "$project" || "$project" == "null" ]]; then
+            project="[unassigned]"
+        fi
+
+        dual_exists="no"
+        avp_exists="no"
+        [[ -f "$ALM_LAYOUTS_DIR/$ws.json" ]] && dual_exists="yes"
+        [[ -f "$ALM_LAYOUTS_DIR/avp/$ws.json" ]] && avp_exists="yes"
+
+        layout_status="dual:${dual_exists} avp:${avp_exists}"
+
+        printf '  %-12s %-20s %-8s %s\n' "$ws" "$project" "$active" "$layout_status"
+    done
+    printf '\n'
+}
+
+# =============================================================================
+# PROJECT CRUD
+# =============================================================================
+
+# Prompt for a project definition and return JSON
+_prompt_project() {
+    local existing_name="${1:-}"
+    local existing_json="${2:-}"
+
+    local name dir subdir iterm_cmd xcodeproj
+
+    # Name
+    if [[ -n "$existing_name" ]]; then
+        name="$existing_name"
+        echo "Project: $name" >&2
+    else
+        printf "Project name: " >&2
+        read -r name
+        if [[ -z "$name" ]]; then
+            echo "[ERROR] Project name cannot be empty" >&2
+            return 1
+        fi
+        # Check for duplicates
+        if project_get "$name" > /dev/null 2>&1; then
+            echo "[ERROR] Project '$name' already exists" >&2
+            return 1
+        fi
+    fi
+
+    # Directory
+    local default_dir=""
+    if [[ -n "$existing_json" ]]; then
+        default_dir=$(echo "$existing_json" | jq -r '.dir // ""')
+    fi
+    printf "Project directory%s: " "${default_dir:+ [$default_dir]}" >&2
+    read -r dir
+    dir="${dir:-$default_dir}"
+    if [[ -z "$dir" ]]; then
+        echo "[ERROR] Project directory cannot be empty" >&2
+        return 1
+    fi
+    # Expand tilde for validation
+    local expanded_dir="${dir/#\~/$HOME}"
+    if [[ ! -d "$expanded_dir" ]]; then
+        echo "[ERROR] Directory does not exist: $dir" >&2
+        return 1
+    fi
+
+    # Subdirectory
+    local default_subdir=""
+    if [[ -n "$existing_json" ]]; then
+        default_subdir=$(echo "$existing_json" | jq -r '.subdir // ""')
+    fi
+    printf "Subdirectory (optional)%s: " "${default_subdir:+ [$default_subdir]}" >&2
+    read -r subdir
+    subdir="${subdir:-$default_subdir}"
+
+    # iTerm command
+    local default_iterm=""
+    if [[ -n "$existing_json" ]]; then
+        default_iterm=$(echo "$existing_json" | jq -r '.iterm_cmd // ""')
+    fi
+    printf "iTerm command (optional, e.g. tmux-tidal or shell command)%s: " "${default_iterm:+ [$default_iterm]}" >&2
+    read -r iterm_cmd
+    iterm_cmd="${iterm_cmd:-$default_iterm}"
+
+    # Xcode project
+    local default_xcode=""
+    if [[ -n "$existing_json" ]]; then
+        default_xcode=$(echo "$existing_json" | jq -r '.xcodeproj // ""')
+    fi
+    printf "Xcode project filename (optional, e.g. MyApp.xcodeproj)%s: " "${default_xcode:+ [$default_xcode]}" >&2
+    read -r xcodeproj
+    xcodeproj="${xcodeproj:-$default_xcode}"
+
+    # Apps (fzf multi-select)
+    local existing_apps=""
+    if [[ -n "$existing_json" ]]; then
+        existing_apps=$(echo "$existing_json" | jq -r '.apps[]' 2>/dev/null | while read -r bid; do
+            _app_display_name "$bid"
+        done | paste -sd ',' -)
+    fi
+
+    echo "" >&2
+    echo "Select apps (TAB to toggle, ENTER to confirm):" >&2
+    if [[ -n "$existing_apps" ]]; then
+        echo "Currently selected: $existing_apps" >&2
+    fi
+
+    local selected_apps
+    selected_apps=$(printf '%s\n' "${KNOWN_APP_NAMES[@]}" | fzf --multi \
+        --header="Select apps for $name (TAB to toggle)" \
+        --prompt="Apps> " \
+        --height=~40% \
+        --reverse \
+        --no-sort 2>/dev/tty) || true
+
+    if [[ -z "$selected_apps" ]]; then
+        echo "[ERROR] At least one app must be selected" >&2
+        return 1
+    fi
+
+    # Build apps JSON array from selected names
+    local apps_json="["
+    local first=true
+    while IFS= read -r app_name; do
+        local bundle_id="${KNOWN_APPS[$app_name]}"
+        if [[ -n "$bundle_id" ]]; then
+            if [[ "$first" == "true" ]]; then
+                first=false
+            else
+                apps_json+=","
+            fi
+            apps_json+="\"$bundle_id\""
+        fi
+    done <<< "$selected_apps"
+    apps_json+="]"
+
+    # Build project JSON
+    local project_json
+    project_json=$(jq -n \
+        --arg name "$name" \
+        --arg dir "$dir" \
+        --arg subdir "$subdir" \
+        --arg iterm_cmd "$iterm_cmd" \
+        --arg xcodeproj "$xcodeproj" \
+        --argjson apps "$apps_json" \
+        '{
+            name: $name,
+            dir: $dir,
+            subdir: $subdir,
+            iterm_cmd: $iterm_cmd,
+            xcodeproj: $xcodeproj,
+            apps: $apps
+        }')
+
+    echo "$project_json"
+}
+
+# Add a new project
+_project_add() {
+    echo "" >&2
+    _bold "  Add New Project" >&2
+    echo "" >&2
+
+    local project_json
+    project_json=$(_prompt_project) || return 1
+
+    local name
+    name=$(echo "$project_json" | jq -r '.name')
+
+    project_set "$name" "$project_json"
+    echo "" >&2
+    echo "Project '$name' added." >&2
+}
+
+# Edit an existing project
+_project_edit() {
+    local name="$1"
+
+    local existing_json
+    existing_json=$(project_get "$name") || {
+        echo "[ERROR] Project '$name' not found" >&2
+        return 1
+    }
+
+    echo "" >&2
+    _bold "  Edit Project: $name" >&2
+    echo "" >&2
+
+    local project_json
+    project_json=$(_prompt_project "$name" "$existing_json") || return 1
+
+    project_set "$name" "$project_json"
+    echo "" >&2
+    echo "Project '$name' updated." >&2
+
+    # Regenerate layouts for any workspace using this project
+    _regenerate_for_project "$name"
+}
+
+# Delete a project
+_project_delete() {
+    local name="$1"
+
+    printf "Delete project '%s'? (y/N): " "$name" >&2
+    read -r confirm < /dev/tty
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Cancelled." >&2
+        return 0
+    fi
+
+    # Find workspaces using this project and clean up layouts
+    for ws in "${CONFIGURABLE_WORKSPACES[@]}"; do
+        local ws_project
+        ws_project=$(workspace_get "$ws")
+        if [[ "$ws_project" == "$name" ]]; then
+            delete_layout "$ws" "dual"
+            delete_layout "$ws" "avp"
+        fi
+    done
+
+    project_delete "$name"
+    echo "Project '$name' deleted." >&2
+}
+
+# Regenerate layouts for workspaces that use a given project
+_regenerate_for_project() {
+    local project_name="$1"
+    for ws in "${CONFIGURABLE_WORKSPACES[@]}"; do
+        local ws_project
+        ws_project=$(workspace_get "$ws")
+        if [[ "$ws_project" == "$project_name" ]]; then
+            echo "Regenerating layouts for workspace '$ws'..." >&2
+            generate_workspace_layouts "$ws"
+        fi
+    done
+}
+
+# Projects submenu
+_menu_projects() {
+    while true; do
+        local projects
+        projects=$(project_list)
+
+        local options=""
+        if [[ -n "$projects" ]]; then
+            options="$projects"
+        fi
+        options="${options:+$options
+}+ Add new project
+< Back"
+
+        local selection
+        selection=$(echo "$options" | fzf \
+            --header="Projects (select to edit, + to add)" \
+            --prompt="Projects> " \
+            --height=~40% \
+            --reverse \
+            --no-sort 2>/dev/tty) || return 0
+
+        case "$selection" in
+            "+ Add new project")
+                _project_add < /dev/tty
+                ;;
+            "< Back")
+                return 0
+                ;;
+            *)
+                # Selected a project -- show edit/delete options
+                local action
+                action=$(printf 'Edit\nDelete\n< Back' | fzf \
+                    --header="Project: $selection" \
+                    --prompt="Action> " \
+                    --height=~40% \
+                    --reverse \
+                    --no-sort 2>/dev/tty) || continue
+
+                case "$action" in
+                    "Edit")
+                        _project_edit "$selection" < /dev/tty
+                        ;;
+                    "Delete")
+                        _project_delete "$selection"
+                        ;;
+                    "< Back")
+                        continue
+                        ;;
+                esac
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# WORKSPACE ASSIGNMENT
+# =============================================================================
+
+_menu_workspaces() {
+    while true; do
+        # Build workspace list with current assignments
+        local ws_list=""
+        for ws in "${CONFIGURABLE_WORKSPACES[@]}"; do
+            local project
+            project=$(workspace_get "$ws")
+            if [[ -z "$project" || "$project" == "null" ]]; then
+                project="[unassigned]"
+            fi
+            ws_list+="${ws}  -->  ${project}"$'\n'
+        done
+        ws_list+="< Back"
+
+        local selection
+        selection=$(echo "$ws_list" | fzf \
+            --header="Workspaces (select to assign/unassign)" \
+            --prompt="Workspaces> " \
+            --height=~40% \
+            --reverse \
+            --no-sort 2>/dev/tty) || return 0
+
+        if [[ "$selection" == "< Back" ]]; then
+            return 0
+        fi
+
+        # Extract workspace name (everything before "  -->  ")
+        local ws
+        ws=$(echo "$selection" | sed 's/  -->  .*//')
+
+        # Show project picker for this workspace
+        local projects
+        projects=$(project_list)
+
+        if [[ -z "$projects" ]]; then
+            echo "No projects defined. Add a project first." >&2
+            read -r -p "Press Enter to continue..." < /dev/tty
+            continue
+        fi
+
+        local picker_options
+        picker_options=$(printf '%s\n' "$projects")
+        picker_options+=$'\n'"[unassign]"
+        picker_options+=$'\n'"< Back"
+
+        local chosen
+        chosen=$(echo "$picker_options" | fzf \
+            --header="Assign project to workspace: $ws" \
+            --prompt="Project> " \
+            --height=~40% \
+            --reverse \
+            --no-sort 2>/dev/tty) || continue
+
+        case "$chosen" in
+            "< Back")
+                continue
+                ;;
+            "[unassign]")
+                workspace_clear "$ws"
+                delete_layout "$ws" "dual"
+                delete_layout "$ws" "avp"
+                echo "Workspace '$ws' unassigned." >&2
+                ;;
+            *)
+                workspace_set "$ws" "$chosen"
+                echo "Assigned '$chosen' to workspace '$ws'." >&2
+                echo "Generating layouts..." >&2
+                generate_workspace_layouts "$ws"
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# REGENERATE
+# =============================================================================
+
+do_regenerate() {
+    config_init
+    echo "Regenerating all workspace layouts..." >&2
+    regenerate_all_layouts
+    echo "Done." >&2
+}
+
+do_generate_single() {
+    local workspace="$1"
+    config_init
+
+    # Validate workspace name
+    local valid=false
+    for ws in "${CONFIGURABLE_WORKSPACES[@]}"; do
+        if [[ "$ws" == "$workspace" ]]; then
+            valid=true
+            break
+        fi
+    done
+
+    if [[ "$valid" != "true" ]]; then
+        echo "[ERROR] Invalid workspace: $workspace. Must be one of: ${CONFIGURABLE_WORKSPACES[*]}" >&2
+        return 1
+    fi
+
+    echo "Generating layouts for workspace '$workspace'..." >&2
+    generate_workspace_layouts "$workspace"
+    echo "Done." >&2
+}
+
+# =============================================================================
+# HELP
+# =============================================================================
+
+print_help() {
+    cat <<'USAGE'
+alm-config -- AeroSpace Layout Manager Configurator
+
+Usage:
+  alm-config                    Launch interactive TUI
+  alm-config status             Print workspace bindings table
+  alm-config list               Same as status
+  alm-config regenerate         Regenerate all layout JSONs
+  alm-config generate <ws>      Regenerate layout for a single workspace
+  alm-config --help             Display this help message
+
+Configurable workspaces: code, code2, code3, homelab
+
+Data stored in: ~/.config/aerospace/projects.json
+Generated layouts: ~/.config/aerospace/layouts/
+USAGE
+}
+
+# =============================================================================
+# MAIN MENU (INTERACTIVE TUI)
+# =============================================================================
+
+main_menu() {
+    config_init
+
+    while true; do
+        local selection
+        selection=$(printf 'Projects\nWorkspaces\nStatus\nRegenerate All\nQuit' | fzf \
+            --header="alm-config -- AeroSpace Layout Manager" \
+            --prompt="Menu> " \
+            --height=~40% \
+            --reverse \
+            --no-sort 2>/dev/tty) || break
+
+        case "$selection" in
+            "Projects")
+                _menu_projects
+                ;;
+            "Workspaces")
+                _menu_workspaces
+                ;;
+            "Status")
+                print_status
+                read -r -p "Press Enter to continue..." < /dev/tty
+                ;;
+            "Regenerate All")
+                do_regenerate
+                read -r -p "Press Enter to continue..." < /dev/tty
+                ;;
+            "Quit")
+                break
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# ENTRY POINT
+# =============================================================================
+
+main() {
+    case "${1:-}" in
+        --help|-h)
+            print_help
+            ;;
+        status|list)
+            print_status
+            ;;
+        regenerate)
+            do_regenerate
+            ;;
+        generate)
+            if [[ -z "${2:-}" ]]; then
+                echo "[ERROR] Usage: alm-config generate <workspace>" >&2
+                exit 1
+            fi
+            do_generate_single "$2"
+            ;;
+        "")
+            main_menu
+            ;;
+        *)
+            echo "[ERROR] Unknown command: $1" >&2
+            echo "Run 'alm-config --help' for usage information." >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
