@@ -52,6 +52,24 @@ export function assignNodeIds(node: TreeNode): TreeNode {
   return cloned;
 }
 
+/**
+ * Strip all _nodeId fields from a tree (deep clone).
+ * Use before sending to the backend or writing to disk.
+ */
+export function stripNodeIds(node: TreeNode): TreeNode {
+  const cloned = JSON.parse(JSON.stringify(node));
+  function walk(n: Record<string, unknown>): void {
+    delete n['_nodeId'];
+    if (Array.isArray(n.children)) {
+      for (const child of n.children) {
+        walk(child as Record<string, unknown>);
+      }
+    }
+  }
+  walk(cloned as Record<string, unknown>);
+  return cloned as TreeNode;
+}
+
 /** Find a node by its _nodeId within the tree. */
 export function findNodeById(
   tree: TreeNode,

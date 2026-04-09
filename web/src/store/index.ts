@@ -7,6 +7,7 @@ export {
   assignNodeIds,
   findNodeById,
   getNodeId,
+  stripNodeIds,
   findParent,
   removeNode,
   insertNode,

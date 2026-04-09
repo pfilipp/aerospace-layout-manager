@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TreeNode, AppEntry, ContainerNode, Project } from './types';
 import { Sidebar } from './components/Sidebar';
 import { TreeEditor } from './components/LayoutTree';
@@ -7,7 +7,7 @@ import { GenerateToolbar, StaleIndicator } from './components/GenerateToolbar';
 import { MigrationDialog } from './components/MigrationDialog';
 import { ProjectDialog } from './components/ProjectDialog';
 import { ToastContainer, addToast } from './components/Toast';
-import { useEditorStore, useKeyboardShortcuts, pushUndo, findNodeById, getNodeId } from './store';
+import { useEditorStore, useKeyboardShortcuts, pushUndo, findNodeById, getNodeId, stripNodeIds } from './store';
 import { flattenTree } from './components/LayoutTree/FlatSortable/flattenTree';
 import { useWorkspace, useApps, useModes, useOptimisticWorkspaceUpdate, useConfig } from './api/hooks';
 
@@ -53,6 +53,35 @@ function App() {
     activeWorkspace ?? '',
   );
 
+  // Auto-save tree changes to backend (covers addNode, deleteNode, etc.)
+  const prevTreeRef = useRef<ContainerNode | null>(null);
+  useEffect(() => {
+    // Skip the initial load and workspace switches (handled by loadedWorkspaceRef)
+    if (!tree || !activeMode || !activeWorkspace) {
+      prevTreeRef.current = tree;
+      return;
+    }
+    // Skip if this is the first load of a workspace
+    if (prevTreeRef.current === null) {
+      prevTreeRef.current = tree;
+      return;
+    }
+    // Skip if tree reference hasn't changed
+    if (tree === prevTreeRef.current) return;
+    prevTreeRef.current = tree;
+
+    configModifiedRef.current = true;
+    const cleanTree = stripNodeIds(tree) as ContainerNode;
+    saveWorkspace.mutate(
+      { layout: cleanTree },
+      {
+        onError: (err) => {
+          addToast('error', `Failed to save layout: ${err.message}`);
+        },
+      },
+    );
+  }, [tree, activeMode, activeWorkspace, saveWorkspace]);
+
   // Resolve the selected TreeNode for the properties panel
   const selectedNode: TreeNode | null =
     tree && selectedNodeId ? findNodeById(tree, selectedNodeId) : null;
@@ -64,21 +93,9 @@ function App() {
         const stacks = pushUndo(currentTree, undoStack);
         useEditorStore.setState({ tree: newLayout, ...stacks });
       }
-
-      // Save to backend with optimistic update
-      if (activeMode && activeWorkspace) {
-        configModifiedRef.current = true;
-        saveWorkspace.mutate(
-          { layout: newLayout },
-          {
-            onError: (err) => {
-              addToast('error', `Failed to save layout: ${err.message}`);
-            },
-          },
-        );
-      }
+      // Save is handled by the tree useEffect above
     },
-    [activeMode, activeWorkspace, saveWorkspace],
+    [],
   );
 
   const handleSelectNode = useCallback(
@@ -106,22 +123,9 @@ function App() {
     (updatedNode: TreeNode) => {
       if (!selectedNodeId) return;
       updateNode(selectedNodeId, updatedNode);
-
-      // Save to backend after property update
-      const { tree: currentTree } = useEditorStore.getState();
-      if (activeMode && activeWorkspace && currentTree) {
-        configModifiedRef.current = true;
-        saveWorkspace.mutate(
-          { layout: currentTree },
-          {
-            onError: (err) => {
-              addToast('error', `Failed to save changes: ${err.message}`);
-            },
-          },
-        );
-      }
+      // Save is handled by the tree useEffect above
     },
-    [selectedNodeId, updateNode, activeMode, activeWorkspace, saveWorkspace],
+    [selectedNodeId, updateNode],
   );
 
   // Track which workspace's data is currently loaded in the editor

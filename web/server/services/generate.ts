@@ -70,7 +70,18 @@ function renumberWindowIds(node: TreeNode, counter: { value: number }): void {
 // --- Deep clone a container node ---
 
 function deepCloneContainer(container: ContainerNode): ContainerNode {
-  return JSON.parse(JSON.stringify(container));
+  const cloned = JSON.parse(JSON.stringify(container));
+  // Strip runtime _nodeId fields that shouldn't appear in generated output
+  function stripNodeIds(node: Record<string, unknown>): void {
+    delete node['_nodeId'];
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        stripNodeIds(child as Record<string, unknown>);
+      }
+    }
+  }
+  stripNodeIds(cloned);
+  return cloned;
 }
 
 // --- Build layout JSON output ---
@@ -176,7 +187,7 @@ export async function generateWorkspace(
     skippedWorkspaces: [],
   };
 
-  if (!workspace.active) {
+  if (workspace.active === false) {
     result.skippedWorkspaces.push(`${modeName}/${wsName}`);
     return result;
   }
@@ -209,7 +220,7 @@ async function generateModeLayouts(
   };
 
   for (const [wsName, workspace] of Object.entries(resolved)) {
-    if (!workspace.active) {
+    if (workspace.active === false) {
       result.skippedWorkspaces.push(`${modeName}/${wsName}`);
       continue;
     }
