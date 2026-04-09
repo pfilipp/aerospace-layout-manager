@@ -1,0 +1,60 @@
+{
+  "projects": {
+    "tidal": {
+      "name": "tidal",
+      "dir": "~/Projects/tlg/tidal",
+      "subdir": "gobenny-fe",
+      "iterm_cmd": "tmux-tidal",
+      "xcodeproj": "",
+      "apps": [
+        "com.microsoft.VSCode",
+        "com.googlecode.iterm2"
+      ]
+    },
+    "color-guide": {
+      "name": "color-guide",
+      "dir": "~/Projects/private/xcode/color-guide",
+      "subdir": "",
+      "iterm_cmd": "cd ~/Projects/private/xcode/color-guide && claude --dangerously-skip-permissions",
+      "xcodeproj": "color-guide.xcodeproj",
+      "apps": [
+        "com.microsoft.VSCode",
+        "com.googlecode.iterm2",
+        "com.apple.dt.Xcode",
+        "com.apple.Safari"
+      ]
+    },
+    "promptly": {
+      "name": "promptly",
+      "dir": "~/Projects/private/xcode/promptly",
+      "subdir": "",
+      "iterm_cmd": "cd ~/Projects/private/xcode/promptly && claude --dangerously-skip-permissions",
+      "xcodeproj": "promptly.xcodeproj",
+      "apps": [
+        "com.microsoft.VSCode",
+        "com.googlecode.iterm2",
+        "com.apple.dt.Xcode",
+        "com.apple.Safari"
+      ]
+    },
+    "language-loop": {
+      "name": "language-loop",
+      "dir": "~/Projects/private/xcode/language-loop",
+      "subdir": "",
+      "iterm_cmd": "cd ~/Projects/private/xcode/language-loop && claude --dangerously-skip-permissions",
+      "xcodeproj": "language-loop.xcodeproj",
+      "apps": [
+        "com.microsoft.VSCode",
+        "com.googlecode.iterm2",
+        "com.apple.dt.Xcode",
+        "com.apple.Safari"
+      ]
+    }
+  },
+  "workspaces": {
+    "code": { "project": "tidal", "active": true },
+    "code2": { "project": "color-guide", "active": false },
+    "code3": { "project": "promptly", "active": false },
+    "homelab": { "project": "language-loop", "active": true }
+  }
+}
