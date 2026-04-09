@@ -1,0 +1,98 @@
+[
+  {
+    "name": "code",
+    "type": "workspace",
+    "root-container": {
+      "type": "container",
+      "layout": "h_tiles",
+      "orientation": "horizontal",
+      "children": [
+        {
+          "type": "container",
+          "layout": "v_accordion",
+          "orientation": "vertical",
+          "children": [
+            {
+              "type": "window",
+              "app-bundle-id": "com.apple.Safari",
+              "app-name": "Safari",
+              "title": "Work",
+              "window-id": 1,
+              "startup": "safari-profile Work"
+            },
+            {
+              "type": "window",
+              "app-bundle-id": "com.figma.Desktop",
+              "app-name": "Figma",
+              "title": "",
+              "window-id": 2,
+              "startup": "open -a Figma"
+            },
+            {
+              "type": "window",
+              "app-bundle-id": "com.anthropic.claudefordesktop",
+              "app-name": "Claude",
+              "title": "",
+              "window-id": 3,
+              "startup": "open -a Claude"
+            }
+          ]
+        },
+        {
+          "type": "container",
+          "layout": "v_accordion",
+          "orientation": "vertical",
+          "children": [
+            {
+              "type": "window",
+              "app-bundle-id": "com.microsoft.VSCode",
+              "app-name": "Code",
+              "title": "${PROJECT_NAME}",
+              "window-id": 4,
+              "startup": "code ${PROJECT_DIR}/${PROJECT_SUBDIR}"
+            },
+            {
+              "type": "window",
+              "app-bundle-id": "com.googlecode.iterm2",
+              "app-name": "iTerm2",
+              "title": "${PROJECT_NAME}",
+              "window-id": 5,
+              "startup": "~/nix-config/modules/darwin/scripts/iterm-window.sh '${PROJECT_ITERM_CMD}'"
+            },
+            {
+              "type": "window",
+              "app-bundle-id": "com.apple.dt.Xcode",
+              "app-name": "Xcode",
+              "title": "${PROJECT_NAME}",
+              "window-id": 6,
+              "startup": "open ${PROJECT_DIR}/${PROJECT_XCODEPROJ}"
+            }
+          ]
+        },
+        {
+          "type": "container",
+          "layout": "v_accordion",
+          "orientation": "vertical",
+          "children": [
+            {
+              "type": "window",
+              "app-bundle-id": "com.tinyspeck.slackmacgap",
+              "app-name": "Slack",
+              "title": "",
+              "window-id": 7,
+              "startup": "open -a Slack"
+            },
+            {
+              "type": "window",
+              "app-bundle-id": "com.brave.Browser",
+              "app-name": "Brave Browser",
+              "title": "Work",
+              "window-id": 8,
+              "startup": "open -a \"Brave Browser\" --args --profile-directory='Profile 1'"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]
