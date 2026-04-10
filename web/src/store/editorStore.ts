@@ -188,7 +188,7 @@ export interface EditorState {
 
   // Tree mutations (all push to undo stack)
   moveNode: (nodeId: string, targetParentId: string, targetIndex: number) => void;
-  addNode: (parentId: string, node: TreeNode) => void;
+  addNode: (parentId: string, node: TreeNode, insertIndex?: number) => void;
   deleteNode: (nodeId: string) => void;
   duplicateNode: (nodeId: string) => void;
   wrapNodes: (nodeIds: string[], containerLayout: LayoutType) => void;
@@ -283,7 +283,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ tree: newTree, ...stacks });
   },
 
-  addNode: (parentId: string, node: TreeNode) => {
+  addNode: (parentId: string, node: TreeNode, insertIndex?: number) => {
     const { tree, undoStack } = get();
     if (!tree) return;
 
@@ -307,7 +307,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     const nodeWithId = assignNodeIds(normalizedNode);
-    parent.children.push(nodeWithId);
+    if (insertIndex !== undefined && insertIndex < parent.children.length) {
+      parent.children.splice(insertIndex, 0, nodeWithId);
+    } else {
+      parent.children.push(nodeWithId);
+    }
     set({ tree: newTree, ...stacks });
   },
 

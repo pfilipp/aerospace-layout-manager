@@ -151,28 +151,22 @@ main() {
     log "Phase 1: Creating nested containers..."
     apply_layout "$root_container" "$mapping" "$target_workspace" "$root_layout" "true"
 
-    # Step 7a: Re-apply root layout after Phase 1 (T5 fix)
-    # Join operations can mutate the root container's layout type.
-    # Re-applying ensures the root layout is correct before Phase 2.
+    # Step 7a: Re-apply root layout after Phase 1
+    # aerospace_layout targets the PARENT container of the focused window.
+    # After Phase 1, some windows may be inside nested containers, so we
+    # must find a window that's still at root level. If ALL windows are
+    # in nested containers, we temporarily move one to root level.
     log "Re-applying root layout after Phase 1: $root_layout"
-    if [[ -n "$any_window" ]]; then
-        aerospace_focus --window-id "$any_window"
-        aerospace_layout "$root_layout"
-    fi
+    set_root_layout "$root_layout" "$target_workspace" "$mapping" "$root_container"
 
     # Phase 2: Apply layouts to all containers
     # Done separately to prevent layout changes from affecting joins
     log "Phase 2: Applying container layouts..."
     apply_layouts "$root_container" "$mapping" "$target_workspace" "true"
 
-    # Step 8a: Re-apply root layout after Phase 2 (T5 fix - safety net)
-    # Phase 2 layout operations on child containers could theoretically
-    # affect the root if a window is incorrectly parented.
+    # Step 8a: Re-apply root layout after Phase 2 (safety net)
     log "Re-applying root layout after Phase 2: $root_layout"
-    if [[ -n "$any_window" ]]; then
-        aerospace_focus --window-id "$any_window"
-        aerospace_layout "$root_layout"
-    fi
+    set_root_layout "$root_layout" "$target_workspace" "$mapping" "$root_container"
 
     log "=========================================="
     log "Layout recreation complete!"

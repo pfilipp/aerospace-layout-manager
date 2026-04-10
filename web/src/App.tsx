@@ -7,6 +7,7 @@ import { GenerateToolbar, StaleIndicator } from './components/GenerateToolbar';
 import { MigrationDialog } from './components/MigrationDialog';
 import { ProjectDialog } from './components/ProjectDialog';
 import { ToastContainer, addToast } from './components/Toast';
+import { DndProvider } from './components/DndProvider';
 import { useEditorStore, useKeyboardShortcuts, pushUndo, findNodeById, findParent, getNodeId, stripNodeIds } from './store';
 import { flattenTree } from './components/LayoutTree/FlatSortable/flattenTree';
 import { useWorkspace, useApps, useModes, useOptimisticWorkspaceUpdate, useConfig } from './api/hooks';
@@ -227,6 +228,7 @@ function App() {
           <MigrationDialog prominent={false} />
         </div>
       </header>
+      <DndProvider>
       <main className="flex h-[calc(100vh-57px)]">
         <Sidebar
           onSelectMode={handleSelectMode}
@@ -271,6 +273,7 @@ function App() {
           />
         </aside>
       </main>
+      </DndProvider>
     </div>
   );
 }

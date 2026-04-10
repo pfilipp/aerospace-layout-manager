@@ -121,6 +121,7 @@ export function reorderWithinParent(
  * @param flatNodes - Current flat node list for resolving IDs to tree positions
  * @param activeId - FlatNode ID of the node being dragged
  * @param overId - FlatNode ID of the drop target
+ * @param insertIndex - Optional: specific position within target container (for 'inside' drops)
  * @returns New root container with the node moved, or the original root if no move was needed
  */
 export function moveNodeBetweenContainers(
@@ -128,6 +129,7 @@ export function moveNodeBetweenContainers(
   flatNodes: FlatNode[],
   activeId: string,
   overId: string,
+  insertIndex?: number,
 ): ContainerNode {
   const activeNode = flatNodes.find((n) => n.id === activeId);
   const overNode = flatNodes.find((n) => n.id === overId);
@@ -138,21 +140,26 @@ export function moveNodeBetweenContainers(
   if (activeNode.parentId === null) return root;
 
   // Determine the target parent container and insertion index:
-  // - If dropping ON a container node -> insert as last child of that container
+  // - If dropping ON a container node -> insert at insertIndex (or last child)
   // - If dropping ON a window/leaf node -> insert next to it in its parent container
   let targetParentId: string;
   let targetIndex: number;
 
   if (overNode.node.type === 'container' && overNode.id !== activeId) {
-    // Dropping on a container: add as last child
+    // Dropping on a container: use insertIndex if provided, otherwise append
     targetParentId = overNode.id;
     const overContainer = overNode.node as ContainerNode;
-    targetIndex = overContainer.children.length;
+
+    if (insertIndex !== undefined) {
+      targetIndex = insertIndex;
+    } else {
+      targetIndex = overContainer.children.length;
+    }
 
     // If the active node is currently a child of this container,
     // we need to adjust the index since it will be removed first
-    if (activeNode.parentId === overNode.id) {
-      targetIndex = overContainer.children.length - 1;
+    if (activeNode.parentId === overNode.id && activeNode.index < targetIndex) {
+      targetIndex = Math.max(0, targetIndex - 1);
     }
   } else {
     // Dropping on a window (or a non-droppable): insert next to it in its parent
@@ -174,16 +181,15 @@ export function moveNodeBetweenContainers(
   // Deep clone the tree
   const newRoot = structuredClone(root);
 
-  // Find the source parent and remove the node
+  // Find BOTH parents BEFORE any mutations — splice shifts indices and
+  // makes flatNode paths stale for findContainerById
   const sourceParent = findContainerById(newRoot, flatNodes, activeNode.parentId);
-  if (!sourceParent) return root;
+  const targetParent = findContainerById(newRoot, flatNodes, targetParentId);
+  if (!sourceParent || !targetParent) return root;
 
+  // Now remove from source
   const [movedNode] = sourceParent.children.splice(activeNode.index, 1);
   if (!movedNode) return root;
-
-  // Find the target parent and insert the node
-  const targetParent = findContainerById(newRoot, flatNodes, targetParentId);
-  if (!targetParent) return root;
 
   // Clamp the index in case the removal shifted things
   const clampedIndex = Math.min(targetIndex, targetParent.children.length);

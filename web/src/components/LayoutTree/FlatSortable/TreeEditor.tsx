@@ -1,19 +1,10 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
-import {
-  DndContext,
-  PointerSensor,
-  KeyboardSensor,
-  useSensors,
-  useSensor,
-  DragOverlay,
-} from '@dnd-kit/core';
-import type { DragStartEvent, DragEndEvent, DragOverEvent } from '@dnd-kit/core';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import type { DragEndEvent, DragOverEvent } from '@dnd-kit/core';
 import {
   SortableContext,
   verticalListSortingStrategy,
-  sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
-import type { ContainerNode, WindowNode, AppEntry } from '../../../types';
+import type { ContainerNode, WindowNode } from '../../../types';
 import type { FlatNode } from '../types';
 import { flattenTree, reorderWithinParent, moveNodeBetweenContainers } from './flattenTree';
 import { SortableNodeWrapper } from './TreeNode';
@@ -28,6 +19,7 @@ import { TreeActions } from '../TreeActions';
 import { ContextMenu } from '../ContextMenu';
 import type { ContextMenuAction } from '../ContextMenu';
 import { useEditorStore } from '../../../store';
+import { useDndState, useDndRegistration } from '../../DndProvider';
 
 interface TreeEditorProps {
   /** The root container of the layout tree */
@@ -72,10 +64,13 @@ export function TreeEditor({
   onSelectNode,
 }: TreeEditorProps) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
-  const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
+  // Shared DnD state from DndProvider
+  const { activeDragId } = useDndState();
+  const { registerDragEndHandler, registerDragOverHandler, registerCollisionDetection } = useDndRegistration();
 
   // Store actions for context menu and tree manipulation
   const deleteNode = useEditorStore((s) => s.deleteNode);
@@ -103,18 +98,14 @@ export function TreeEditor({
     [],
   );
 
+  // Register collision detection with DndProvider
+  useEffect(() => {
+    registerCollisionDetection(collisionDetection);
+  }, [collisionDetection, registerCollisionDetection]);
+
   const nodeIds = useMemo(
     () => flatNodes.map((n) => n.id),
     [flatNodes],
-  );
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
   );
 
   const handleToggleCollapse = useCallback((id: string) => {
@@ -224,74 +215,59 @@ export function TreeEditor({
     setMultiSelectedIds(new Set());
   }, []);
 
-  // Handle drag-from-sidebar: native dragover/drop for 'application/x-alm-app'
-  const handleNativeDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('application/x-alm-app')) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-    }
-  }, []);
-
-  const handleNativeDrop = useCallback(
-    (e: React.DragEvent) => {
-      const data = e.dataTransfer.getData('application/x-alm-app');
-      if (!data) return;
-
-      e.preventDefault();
-
-      let parsed: { bundleId: string; app: AppEntry };
-      try {
-        parsed = JSON.parse(data);
-      } catch {
-        return;
-      }
-
-      // Find the closest container at the drop point using DOM data attributes
-      const targetFlatId = findDropTargetContainer(e, flatNodes);
-      // Resolve to a store _nodeId
-      const targetStoreId = targetFlatId
-        ? resolveStoreNodeId(targetFlatId, flatNodes)
-        : getNodeIdFromTreeNode(layout);
-
-      if (!targetStoreId) return;
-
-      const windowNode: WindowNode = {
-        type: 'window',
-        'app-bundle-id': parsed.bundleId,
-        'app-name': parsed.app.name,
-        startup: parsed.app.defaultStartup || '',
-        title: '',
-        'window-id': 0,
-      };
-
-      addNode(targetStoreId, windowNode);
-    },
-    [layout, flatNodes, addNode],
-  );
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveDragId(String(event.active.id));
-    setDropTarget(null);
-    setCurrentDropTarget(null);
-  }, []);
-
+  // Register drag-over handler with DndProvider
   const handleDragOver = useCallback((_event: DragOverEvent) => {
     const target = getCurrentDropTarget();
     setDropTarget(target);
   }, []);
 
+  useEffect(() => {
+    registerDragOverHandler(handleDragOver);
+    return () => registerDragOverHandler(null);
+  }, [handleDragOver, registerDragOverHandler]);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const resolvedDropTarget = getCurrentDropTarget();
-      setActiveDragId(null);
       setDropTarget(null);
       setCurrentDropTarget(null);
 
       const { active, over } = event;
-      if (!over || active.id === over.id) return;
+      if (!over) return;
 
       const activeId = String(active.id);
       const overId = String(over.id);
+
+      // Handle app drops from sidebar
+      if (activeId.startsWith('app-entry:')) {
+        const appData = active.data.current as { bundleId: string; app: { name: string; defaultStartup?: string } } | undefined;
+        if (!appData) return;
+
+        // Find the target container
+        const overNode = flatNodes.find((n) => n.id === overId);
+        if (!overNode) return;
+
+        const targetFlatId = overNode.node.type === 'container'
+          ? overId
+          : overNode.parentId ?? 'root';
+        const targetStoreId = resolveStoreNodeId(targetFlatId, flatNodes)
+          ?? getNodeIdFromTreeNode(layout);
+        if (!targetStoreId) return;
+
+        const windowNode: WindowNode = {
+          type: 'window',
+          'app-bundle-id': appData.bundleId,
+          'app-name': appData.app.name,
+          startup: appData.app.defaultStartup || '',
+          title: '',
+          'window-id': 0,
+        };
+
+        addNode(targetStoreId, windowNode, resolvedDropTarget?.insertIndex);
+        return;
+      }
+
+      if (active.id === over.id) return;
 
       const activeNode = flatNodes.find((n) => n.id === activeId);
       const overNode = flatNodes.find((n) => n.id === overId);
@@ -306,6 +282,7 @@ export function TreeEditor({
             flatNodes,
             activeId,
             overId,
+            resolvedDropTarget.insertIndex,
           );
           if (newLayout !== layout) {
             onLayoutChange(newLayout);
@@ -314,7 +291,7 @@ export function TreeEditor({
         }
       }
 
-      // Same-parent reorder (T10a)
+      // Same-parent reorder
       if (activeNode.parentId === overNode.parentId) {
         const newLayout = reorderWithinParent(
           layout,
@@ -328,7 +305,7 @@ export function TreeEditor({
         return;
       }
 
-      // Cross-container move (T10c)
+      // Cross-container move
       const newLayout = moveNodeBetweenContainers(
         layout,
         flatNodes,
@@ -339,13 +316,14 @@ export function TreeEditor({
         onLayoutChange(newLayout);
       }
     },
-    [layout, flatNodes, onLayoutChange],
+    [layout, flatNodes, onLayoutChange, addNode],
   );
 
-  // Find the active drag node for the DragOverlay
-  const activeDragNode = activeDragId
-    ? flatNodes.find((n) => n.id === activeDragId)
-    : null;
+  // Register drag-end handler with DndProvider
+  useEffect(() => {
+    registerDragEndHandler(handleDragEnd);
+    return () => registerDragEndHandler(null);
+  }, [handleDragEnd, registerDragEndHandler]);
 
   /**
    * Render function that wraps content in a dnd-kit SortableNodeWrapper.
@@ -378,43 +356,27 @@ export function TreeEditor({
         multiSelectedStoreIds={multiSelectedStoreIds}
         onClearMultiSelect={handleClearMultiSelect}
       />
-      <div
-        className="flex-1 overflow-y-auto p-2"
-        onDragOver={handleNativeDragOver}
-        onDrop={handleNativeDrop}
-      >
-        <DndContext
-          sensors={sensors}
-          collisionDetection={collisionDetection}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
+      <div className="flex-1 overflow-y-auto p-2">
+        <SortableContext
+          items={nodeIds}
+          strategy={verticalListSortingStrategy}
         >
-          <SortableContext
-            items={nodeIds}
-            strategy={verticalListSortingStrategy}
-          >
-            <RecursiveContainer
-              container={layout}
-              depth={0}
-              flatNodeId="root"
-              collapsedIds={collapsedIds}
-              selectedNodeId={selectedNodeId}
-              onSelectNode={handleNodeClick}
-              onToggleCollapse={handleToggleCollapse}
-              flatNodes={flatNodes}
-              renderSortableWrapper={renderSortableWrapper}
-              dropTarget={dropTarget}
-              multiSelectedIds={multiSelectedIds}
-              onContextMenu={handleContextMenu}
-            />
-          </SortableContext>
-          <DragOverlay>
-            {activeDragNode ? (
-              <DragOverlayContent flatNode={activeDragNode} />
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+          <RecursiveContainer
+            container={layout}
+            depth={0}
+            flatNodeId="root"
+            collapsedIds={collapsedIds}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={handleNodeClick}
+            onToggleCollapse={handleToggleCollapse}
+            flatNodes={flatNodes}
+            renderSortableWrapper={renderSortableWrapper}
+            dropTarget={dropTarget}
+            multiSelectedIds={multiSelectedIds}
+            onContextMenu={handleContextMenu}
+            activeDragId={activeDragId}
+          />
+        </SortableContext>
       </div>
 
       {/* Context menu overlay */}
@@ -430,64 +392,3 @@ export function TreeEditor({
   );
 }
 
-/**
- * Lightweight overlay shown while dragging a node.
- */
-function DragOverlayContent({ flatNode }: { flatNode: FlatNode }) {
-  const isContainer = flatNode.node.type === 'container';
-
-  return (
-    <div className="flex items-center gap-2 py-1.5 px-3 rounded bg-gray-800 border border-blue-600 shadow-lg shadow-blue-900/30 opacity-90">
-      {isContainer ? (
-        <>
-          <span className="text-yellow-500">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.621 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
-            </svg>
-          </span>
-          <span className="text-sm text-gray-200 font-medium">
-            {(flatNode.node as ContainerNode).layout}
-          </span>
-        </>
-      ) : (
-        <>
-          <span className="text-blue-400">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm1 2v8h10V5H3z" />
-            </svg>
-          </span>
-          <span className="text-sm text-gray-200">
-            {(flatNode.node as WindowNode)['app-name'] ||
-              (flatNode.node as WindowNode)['app-bundle-id']}
-          </span>
-        </>
-      )}
-    </div>
-  );
-}
-
-/**
- * Try to find a container node near the native drop point.
- * Walks up the DOM from the drop target to find a data-node-id attribute.
- */
-function findDropTargetContainer(
-  e: React.DragEvent,
-  flatNodes: FlatNode[],
-): string | null {
-  let el: HTMLElement | null = e.target as HTMLElement;
-  while (el) {
-    const nodeId = el.getAttribute('data-node-id');
-    if (nodeId) {
-      const flatNode = flatNodes.find((n) => n.id === nodeId);
-      if (flatNode && flatNode.node.type === 'container') {
-        return nodeId;
-      }
-      // If it's a window, use its parent container
-      if (flatNode && flatNode.parentId) {
-        return flatNode.parentId;
-      }
-    }
-    el = el.parentElement;
-  }
-  return null;
-}

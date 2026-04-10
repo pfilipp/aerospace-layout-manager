@@ -7,6 +7,46 @@
 [[ -n "${_ALM_LAYOUT_PHASE2_LOADED:-}" ]] && return 0
 _ALM_LAYOUT_PHASE2_LOADED=1
 
+# Set the root container's layout safely.
+#
+# `aerospace layout` targets the PARENT container of the focused window.
+# After Phase 1, windows may be inside nested containers. Focusing such
+# a window and calling `aerospace layout` would change the nested
+# container's layout, not the root's.
+#
+# Strategy:
+# 1. Query the LIVE tree for a window that's directly under root
+# 2. If found → focus it, set layout (targets root)
+# 3. If not found → root layout was set in Step 6 and joins preserve it,
+#    so skip re-application rather than risk corrupting nested containers
+set_root_layout() {
+    local root_layout="$1"
+    local workspace="$2"
+    local mapping="$3"
+    local root_container="$4"
+
+    # Query the live tree to find a window directly under the root container
+    local root_window_id
+    root_window_id=$(aerospace tree --json --workspace "$workspace" 2>/dev/null | jq -r '
+        # Navigate to root container (workspace > root-container or first container)
+        if type == "array" then .[0] else . end |
+        if .type == "workspace" then
+            (.["root-container"] // .children[0] // .)
+        else . end |
+        # Find first direct window child
+        (.children // []) | map(select(.type == "window")) |
+        .[0]["window-id"] // null
+    ' 2>/dev/null || echo "null")
+
+    if [[ -n "$root_window_id" && "$root_window_id" != "null" ]]; then
+        debug "set_root_layout: found root-level window $root_window_id"
+        aerospace_focus --window-id "$root_window_id"
+        aerospace_layout "$root_layout"
+    else
+        debug "set_root_layout: no root-level windows, skipping (root layout preserved from Step 6)"
+    fi
+}
+
 # Second pass: Apply layouts to all containers (post-order traversal)
 # This is done after all joins to prevent layout changes from affecting subsequent joins
 apply_layouts() {

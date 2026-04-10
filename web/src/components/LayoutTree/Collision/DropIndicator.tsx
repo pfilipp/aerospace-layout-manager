@@ -23,33 +23,53 @@ interface DropIndicatorProps {
   depth: number;
   /** Whether this node is a container */
   isContainer: boolean;
+  /** Parent container's flat ID (for showing insertion within parent) */
+  parentId?: string | null;
+  /** Index within parent's children */
+  indexInParent?: number;
 }
 
 /**
  * Renders a drop indicator relative to a specific tree node.
  * Place this component inside each tree node's wrapper.
- * It only renders when the dropTarget matches this node's ID.
+ * It renders when:
+ * 1. The dropTarget matches this node's ID directly (before/after/inside)
+ * 2. This node is a child of the targeted container at the insertion index
  */
 export function DropIndicator({
   dropTarget,
   nodeId,
   depth,
   isContainer,
+  parentId,
+  indexInParent,
 }: DropIndicatorProps) {
-  if (!dropTarget || dropTarget.targetId !== nodeId) {
-    return null;
+  if (!dropTarget) return null;
+
+  // Direct target match
+  if (dropTarget.targetId === nodeId) {
+    if (dropTarget.type === 'inside' && isContainer) {
+      return <ContainerHighlight depth={depth} />;
+    }
+
+    if (dropTarget.type === 'before') {
+      return <BetweenIndicator position="top" depth={depth} />;
+    }
+
+    if (dropTarget.type === 'after') {
+      return <BetweenIndicator position="bottom" depth={depth} />;
+    }
   }
 
-  if (dropTarget.type === 'inside' && isContainer) {
-    return <ContainerHighlight depth={depth} />;
-  }
-
-  if (dropTarget.type === 'before') {
+  // Insertion indicator within a container: show a "before" line on the child
+  // at the insertion index when the parent container is the drop target
+  if (
+    dropTarget.type === 'inside' &&
+    dropTarget.insertIndex !== undefined &&
+    parentId === dropTarget.targetId &&
+    indexInParent === dropTarget.insertIndex
+  ) {
     return <BetweenIndicator position="top" depth={depth} />;
-  }
-
-  if (dropTarget.type === 'after') {
-    return <BetweenIndicator position="bottom" depth={depth} />;
   }
 
   return null;

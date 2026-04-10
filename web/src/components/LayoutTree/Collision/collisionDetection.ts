@@ -33,6 +33,8 @@ export function getCurrentDropTarget(): DropTarget | null {
 
 export function setCurrentDropTarget(target: DropTarget | null): void {
   _currentDropTarget = target;
+  // Debug: expose to Playwright
+  (window as unknown as Record<string, unknown>).__DEBUG_DROP_TARGET = target;
 }
 
 /**
@@ -80,8 +82,9 @@ export function createTreeCollisionDetection(
       const id = container.id;
 
       // Skip the actively dragged node and its descendants
+      // (app-entry: items from sidebar are never in the tree, so skip descendant check)
       if (String(id) === activeId) continue;
-      if (isDescendantOf(String(id), activeId, flatNodes)) continue;
+      if (!activeId.startsWith('app-entry:') && isDescendantOf(String(id), activeId, flatNodes)) continue;
 
       const rect = droppableRects.get(id);
       if (!rect) continue;
@@ -139,6 +142,8 @@ export function createTreeCollisionDetection(
       best.flatNode,
       best.rect,
       pointerY,
+      droppableRects as unknown as Map<UniqueIdentifier, { top: number; height: number }>,
+      flatNodes,
     );
 
     setCurrentDropTarget(dropTarget);
@@ -162,13 +167,15 @@ export function createTreeCollisionDetection(
  *
  * - Top 25%: insert before this node
  * - Bottom 25%: insert after this node
- * - Middle 50% on a container: insert as child (inside)
+ * - Middle 50% on a container: insert as child (inside) with positional index
  * - Middle 50% on a window: insert after (windows can't have children)
  */
 function resolveDropTarget(
   flatNode: FlatNode,
   rect: { top: number; bottom: number; height: number },
   pointerY: number,
+  droppableRects?: Map<UniqueIdentifier, { top: number; height: number }>,
+  flatNodes?: FlatNode[],
 ): DropTarget {
   const relativeY = pointerY - rect.top;
   const proportion = relativeY / rect.height;
@@ -185,12 +192,47 @@ function resolveDropTarget(
 
   // Middle 50%
   if (isContainer) {
-    // Drop into the container (even if collapsed — the container itself is the target)
-    return { type: 'inside', targetId: flatNode.id };
+    // Compute insertion index within the container's children
+    const insertIndex = resolveInsertIndex(
+      flatNode, pointerY, droppableRects, flatNodes,
+    );
+    return { type: 'inside', targetId: flatNode.id, insertIndex };
   }
 
   // Windows can't have children, so treat middle as "after"
   return { type: 'after', targetId: flatNode.id };
+}
+
+/**
+ * Determine where within a container's children the pointer is positioned.
+ * Returns the insertion index (0 = before first child, N = after last child).
+ */
+function resolveInsertIndex(
+  containerFlatNode: FlatNode,
+  pointerY: number,
+  droppableRects?: Map<UniqueIdentifier, { top: number; height: number }>,
+  flatNodes?: FlatNode[],
+): number | undefined {
+  if (!droppableRects || !flatNodes) return undefined;
+  if (containerFlatNode.isCollapsed) return undefined;
+
+  // Find direct children of this container in the flat list
+  const children = flatNodes.filter((n) => n.parentId === containerFlatNode.id);
+  if (children.length === 0) return 0;
+
+  // Find which gap between children the pointer is in
+  for (let i = 0; i < children.length; i++) {
+    const childRect = droppableRects.get(children[i].id);
+    if (!childRect) continue;
+
+    const childMidY = childRect.top + childRect.height / 2;
+    if (pointerY < childMidY) {
+      return i; // Insert before this child
+    }
+  }
+
+  // Pointer is below all children — append to end
+  return children.length;
 }
 
 /**

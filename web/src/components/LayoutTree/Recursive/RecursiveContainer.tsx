@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { ContainerNode, WindowNode } from '../../../types';
 import type { FlatNode } from '../types';
 import { DropIndicator } from '../Collision/DropIndicator';
@@ -42,6 +43,10 @@ interface RecursiveContainerProps {
   multiSelectedIds?: Set<string>;
   /** Callback for right-click context menu */
   onContextMenu?: (id: string, event: React.MouseEvent) => void;
+  /** FlatNode ID of the currently dragged node (null when not dragging) */
+  activeDragId?: string | null;
+  /** Callback when a drop zone is entered during native drag */
+  onDropZoneEnter?: (containerId: string, insertIndex: number) => void;
 }
 
 /**
@@ -64,10 +69,30 @@ export function RecursiveContainer({
   dropTarget,
   multiSelectedIds,
   onContextMenu,
+  activeDragId,
+  onDropZoneEnter,
 }: RecursiveContainerProps) {
   const isCollapsed = collapsedIds.has(flatNodeId);
   const thisFlatNode = flatNodes.find((n) => n.id === flatNodeId);
   const isMultiSelected = multiSelectedIds?.has(flatNodeId) ?? false;
+  const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDragging = activeDragId != null;
+
+  // Auto-expand collapsed containers when a drag hovers over them
+  const isDragTarget = dropTarget?.type === 'inside' && dropTarget?.targetId === flatNodeId;
+  useEffect(() => {
+    if (isDragTarget && isCollapsed) {
+      expandTimerRef.current = setTimeout(() => {
+        onToggleCollapse(flatNodeId);
+      }, 500);
+    }
+    return () => {
+      if (expandTimerRef.current) {
+        clearTimeout(expandTimerRef.current);
+        expandTimerRef.current = null;
+      }
+    };
+  }, [isDragTarget, isCollapsed, flatNodeId, onToggleCollapse]);
 
   if (!thisFlatNode) return null;
 
@@ -84,6 +109,8 @@ export function RecursiveContainer({
         nodeId={flatNodeId}
         depth={depth}
         isContainer={true}
+        parentId={thisFlatNode.parentId}
+        indexInParent={thisFlatNode.index}
       />
       <ContainerHeader
         node={container}
@@ -102,7 +129,11 @@ export function RecursiveContainer({
     return <>{containerHeader}</>;
   }
 
-  // Render children recursively with connecting line
+  // Check if this container is the active drop target
+  const isDropTarget = dropTarget?.type === 'inside' && dropTarget?.targetId === flatNodeId;
+  const dropInsertIndex = isDropTarget ? dropTarget?.insertIndex : undefined;
+
+  // Render children recursively with connecting line and drop zones
   const childElements = container.children.map((child, index) => {
     const childId =
       child.type === 'container'
@@ -114,7 +145,17 @@ export function RecursiveContainer({
     if (child.type === 'container') {
       return (
         <div key={childId} className="relative">
-          {/* Connecting line from parent */}
+          {/* Drop zone overlay at top edge */}
+          {isDragging && (
+            <DropZone
+              containerId={flatNodeId}
+              insertIndex={index}
+              depth={depth + 1}
+              isActive={dropInsertIndex === index}
+              onDropZoneEnter={onDropZoneEnter}
+              position="top"
+            />
+          )}
           <NestingLine depth={depth + 1} isLast={isLastChild} />
           <RecursiveContainer
             container={child}
@@ -129,7 +170,20 @@ export function RecursiveContainer({
             dropTarget={dropTarget}
             multiSelectedIds={multiSelectedIds}
             onContextMenu={onContextMenu}
+            activeDragId={activeDragId}
+            onDropZoneEnter={onDropZoneEnter}
           />
+          {/* Drop zone after last child */}
+          {isDragging && isLastChild && (
+            <DropZone
+              containerId={flatNodeId}
+              insertIndex={index + 1}
+              depth={depth + 1}
+              isActive={dropInsertIndex === index + 1}
+              onDropZoneEnter={onDropZoneEnter}
+              position="bottom"
+            />
+          )}
         </div>
       );
     }
@@ -142,6 +196,17 @@ export function RecursiveContainer({
 
     return (
       <div key={childId} className="relative">
+        {/* Drop zone overlay at top edge */}
+        {isDragging && (
+          <DropZone
+            containerId={flatNodeId}
+            insertIndex={index}
+            depth={depth + 1}
+            isActive={dropInsertIndex === index}
+            onDropZoneEnter={onDropZoneEnter}
+            position="top"
+          />
+        )}
         <NestingLine depth={depth + 1} isLast={isLastChild} />
         {renderSortableWrapper(
           childFlatNode,
@@ -155,6 +220,8 @@ export function RecursiveContainer({
               nodeId={childId}
               depth={depth + 1}
               isContainer={false}
+              parentId={flatNodeId}
+              indexInParent={index}
             />
             <WindowRow
               node={child}
@@ -164,6 +231,17 @@ export function RecursiveContainer({
               onSelect={(e) => onSelectNode(getNodeId(child) ?? childId, e)}
             />
           </div>,
+        )}
+        {/* Drop zone after last child */}
+        {isDragging && isLastChild && (
+          <DropZone
+            containerId={flatNodeId}
+            insertIndex={index + 1}
+            depth={depth + 1}
+            isActive={dropInsertIndex === index + 1}
+            onDropZoneEnter={onDropZoneEnter}
+            position="bottom"
+          />
         )}
       </div>
     );
@@ -341,6 +419,58 @@ function WindowRow({ node, depth, isSelected, isMultiSelected, onSelect }: Windo
       {isMultiSelected && (
         <span className="text-[10px] text-blue-400 ml-auto">selected</span>
       )}
+    </div>
+  );
+}
+
+/**
+ * Visible drop zone rendered between children during drag.
+ * Uses absolute positioning so it doesn't shift the layout.
+ * Sits as a thin overlay at the top edge of its sibling element.
+ */
+function DropZone({
+  containerId,
+  insertIndex,
+  depth,
+  isActive,
+  onDropZoneEnter,
+  position,
+}: {
+  containerId: string;
+  insertIndex: number;
+  depth: number;
+  isActive: boolean;
+  onDropZoneEnter?: (containerId: string, insertIndex: number) => void;
+  /** 'top' for before-child zones, 'bottom' for the zone after the last child */
+  position: 'top' | 'bottom';
+}) {
+  return (
+    <div
+      data-drop-zone={`${containerId}:${insertIndex}`}
+      data-node-id={containerId}
+      className="absolute left-0 right-0 z-30"
+      style={{
+        [position]: -6,
+        height: 12,
+        paddingLeft: depth * INDENT_PX + 20,
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDropZoneEnter?.(containerId, insertIndex);
+      }}
+    >
+      <div
+        className={`
+          h-full rounded transition-colors duration-100
+          ${isActive
+            ? 'bg-blue-500/30 border border-dashed border-blue-400'
+            : 'border border-dashed border-transparent hover:border-blue-500/40 hover:bg-blue-500/10'
+          }
+        `}
+      >
+        <div className={`h-0.5 mt-[5px] rounded-full mx-1 ${isActive ? 'bg-blue-400' : 'bg-transparent'}`} />
+      </div>
     </div>
   );
 }
