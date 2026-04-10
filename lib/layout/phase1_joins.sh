@@ -77,12 +77,6 @@ apply_layout() {
 
     # Now join children together to form this NESTED container
     if [[ "$num_children" -gt 1 ]]; then
-        # Determine join direction based on ROOT's spatial arrangement
-        local join_direction
-        join_direction=$(get_join_direction "$root_layout" "$layout")
-
-        debug "Join direction for creating $layout (root=$root_layout): $join_direction"
-
         # ALGORITHM: Build container with correct window order
         #
         # Key insight: When join-with is executed, the FOUND window (in that
@@ -97,6 +91,11 @@ apply_layout() {
         # - If second child is a container (already processed), it has been moved
         # - We use FIRST child as anchor, join in FORWARD direction to grab second
         # - This avoids extracting windows from already-created nested containers
+        #
+        # CRITICAL FIX (T5): After prior joins have mutated the tree, windows
+        # may no longer be at root level. We query the LIVE tree to determine
+        # the actual spatial arrangement and correct join direction, rather
+        # than assuming the static root_layout still applies.
 
         # Get first child info
         local first_child
@@ -116,19 +115,41 @@ apply_layout() {
 
         # Check if any child is a container (already processed in post-order)
         local has_container_children=false
-        local child_idx=0
-        while [[ $child_idx -lt $num_children ]]; do
+        local scan_idx=0
+        while [[ $scan_idx -lt $num_children ]]; do
             local child_type
-            child_type=$(echo "$children_json" | jq -r ".[$child_idx].type // empty")
+            child_type=$(echo "$children_json" | jq -r ".[$scan_idx].type // empty")
             if [[ "$child_type" == "container" ]]; then
                 has_container_children=true
                 break
             fi
-            ((child_idx++))
+            ((scan_idx++))
         done
 
+        # Guard: both first and second window IDs must be valid for joining
+        if [[ -z "$first_window_id" || -z "$second_window_id" ]]; then
+            debug "WARNING: Cannot create container — missing window mapping (first=$first_window_id, second=$second_window_id)"
+            debug "  Skipping join for this container to avoid grabbing wrong windows"
+            # Still try to add remaining children that DO have mappings via move
+            # (but skip the initial join that would create the container)
+            return
+        fi
+
+        # Query the LIVE tree for actual direction (T5 fix: accounts for tree mutations)
+        local join_direction
         local opposite_direction
-        opposite_direction=$(get_opposite_join_direction "$root_layout")
+
+        if [[ -n "$first_window_id" ]]; then
+            join_direction=$(get_live_join_direction "$workspace" "$first_window_id")
+            opposite_direction=$(get_live_opposite_join_direction "$workspace" "$first_window_id")
+        else
+            # Fallback to static root_layout if we can't query
+            debug "WARNING: Could not determine live direction, falling back to root_layout=$root_layout"
+            join_direction=$(get_join_direction "$root_layout" "$layout")
+            opposite_direction=$(get_opposite_join_direction "$root_layout")
+        fi
+
+        debug "Join direction for creating $layout (live query): join=$join_direction opposite=$opposite_direction"
 
         if [[ "$has_container_children" == "true" ]]; then
             # Special handling: has nested containers (already created)
@@ -153,6 +174,8 @@ apply_layout() {
                         debug "Executing: aerospace move $join_direction for window $target_window_id (idx=$child_idx)"
                         aerospace_focus --window-id "$target_window_id"
                         aerospace_move "$join_direction"
+                    else
+                        debug "WARNING: Skipping child $child_idx — no window mapping"
                     fi
 
                     ((child_idx++))
@@ -180,6 +203,8 @@ apply_layout() {
                         debug "Executing: aerospace move $opposite_direction for window $target_window_id (idx=$child_idx)"
                         aerospace_focus --window-id "$target_window_id"
                         aerospace_move "$opposite_direction"
+                    else
+                        debug "WARNING: Skipping child $child_idx — no window mapping"
                     fi
 
                     ((child_idx++))

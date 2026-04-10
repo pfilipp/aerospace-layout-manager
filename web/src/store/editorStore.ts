@@ -1,5 +1,11 @@
 import { create } from 'zustand';
 import type { ContainerNode, TreeNode, LayoutType, Orientation } from '../types';
+import {
+  getOrientation,
+  enforceOppositeOrientation,
+  findChildViolations,
+  fixChildViolations,
+} from '../utils/normalization';
 
 // --- Tree manipulation helpers ---
 
@@ -259,6 +265,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const removed = removeNode(newTree, nodeId);
     if (!removed) return;
 
+    // If moving a container into another container, enforce opposite orientation
+    if (removed.type === 'container') {
+      const targetParent = findContainerById(newTree, targetParentId);
+      if (targetParent) {
+        const corrected = enforceOppositeOrientation(targetParent.layout, removed.layout);
+        if (corrected !== removed.layout) {
+          removed.layout = corrected;
+          removed.orientation = getOrientation(corrected);
+        }
+      }
+    }
+
     const inserted = insertNode(newTree, targetParentId, removed, targetIndex);
     if (!inserted) return;
 
@@ -271,11 +289,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const stacks = pushUndo(tree, undoStack);
     const newTree = cloneTree(tree);
-    const nodeWithId = assignNodeIds(node);
 
     const parent = findContainerById(newTree, parentId);
     if (!parent) return;
 
+    // Enforce opposite-orientation nesting for container children
+    let normalizedNode = node;
+    if (node.type === 'container') {
+      const correctedLayout = enforceOppositeOrientation(parent.layout, node.layout);
+      if (correctedLayout !== node.layout) {
+        normalizedNode = {
+          ...node,
+          layout: correctedLayout,
+          orientation: getOrientation(correctedLayout),
+        };
+      }
+    }
+
+    const nodeWithId = assignNodeIds(normalizedNode);
     parent.children.push(nodeWithId);
     set({ tree: newTree, ...stacks });
   },
@@ -349,14 +380,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     if (nodesToWrap.length === 0) return;
 
-    // Determine orientation from layout
-    const orientation: Orientation =
-      containerLayout.startsWith('h_') ? 'horizontal' : 'vertical';
+    // Enforce opposite-orientation nesting: the wrapper's layout must differ
+    // from its parent's orientation
+    const correctedLayout = enforceOppositeOrientation(parent.layout, containerLayout);
+    const orientation: Orientation = getOrientation(correctedLayout);
 
     // Create the wrapper container
     const wrapper: ContainerNode = {
       type: 'container',
-      layout: containerLayout,
+      layout: correctedLayout,
       orientation,
       children: nodesToWrap,
     };
@@ -382,6 +414,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const node = findNodeById(newTree, nodeId);
     if (!node) return;
+
+    // If updating a container's layout, enforce normalization
+    if (node.type === 'container' && 'layout' in updates && updates.layout) {
+      const newLayout = updates.layout as LayoutType;
+
+      // Check against parent: if this isn't root, enforce opposite orientation with parent
+      const isRoot = getNodeId(newTree) === nodeId;
+      if (!isRoot) {
+        const parentInfo = findParent(newTree, nodeId);
+        if (parentInfo) {
+          const corrected = enforceOppositeOrientation(parentInfo.parent.layout, newLayout);
+          updates = { ...updates, layout: corrected, orientation: getOrientation(corrected) };
+        }
+      }
+
+      // Fix children that would violate with the new layout
+      const finalLayout = (updates.layout ?? newLayout) as LayoutType;
+      const childViolations = findChildViolations(finalLayout, node.children);
+      if (childViolations.length > 0) {
+        node.children = fixChildViolations(finalLayout, node.children);
+      }
+    }
 
     // Apply updates to the found node
     Object.assign(node, updates);

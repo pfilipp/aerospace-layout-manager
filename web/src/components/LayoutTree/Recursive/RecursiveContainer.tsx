@@ -263,6 +263,18 @@ function ContainerHeader({
         {node.orientation === 'horizontal' ? '\u2194' : '\u2195'}
       </span>
 
+      {/* Normalization constraint indicator for nested containers */}
+      {depth > 0 && (
+        <span
+          className="text-[10px] text-amber-600"
+          title="Orientation is constrained by AeroSpace normalization: nested containers must have opposite orientations from their parent."
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="inline-block">
+            <path d="M8 1a4 4 0 00-4 4v3H3a1 1 0 00-1 1v5a1 1 0 001 1h10a1 1 0 001-1V9a1 1 0 00-1-1h-1V5a4 4 0 00-4-4zm2 7H6V5a2 2 0 114 0v3z" />
+          </svg>
+        </span>
+      )}
+
       {/* Multi-select indicator */}
       {isMultiSelected && (
         <span className="text-[10px] text-blue-400">selected</span>

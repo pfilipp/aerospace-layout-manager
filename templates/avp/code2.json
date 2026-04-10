@@ -17,8 +17,8 @@
         },
         {
           "type": "container",
-          "layout": "v_accordion",
-          "orientation": "vertical",
+          "layout": "h_accordion",
+          "orientation": "horizontal",
           "children": [
             {
               "type": "window",

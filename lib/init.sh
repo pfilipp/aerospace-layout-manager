@@ -26,8 +26,9 @@ source "$_ALM_LIB_DIR/core/dependencies.sh"
 # Aerospace command wrappers (depends on core)
 source "$_ALM_LIB_DIR/aerospace/commands.sh"
 
-# JSON parsing (depends on core)
+# JSON parsing and normalization (depends on core)
 source "$_ALM_LIB_DIR/json/parsing.sh"
+source "$_ALM_LIB_DIR/json/normalize.sh"
 
 # Tree traversal (depends on core)
 source "$_ALM_LIB_DIR/tree/traversal.sh"

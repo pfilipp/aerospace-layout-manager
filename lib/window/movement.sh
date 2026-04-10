@@ -60,6 +60,75 @@ move_windows_to_workspace() {
     move_node_windows "$root_container" "$mapping" "$workspace"
 }
 
+# Reorder root-level windows to match layout tree DFS order.
+# After flatten, windows may be in arbitrary spatial positions.
+# This function moves all windows to temp and back in DFS order,
+# guaranteeing they appear in the correct spatial arrangement
+# for Phase 1's join-with operations.
+reorder_windows_to_dfs() {
+    local root_container="$1"
+    local mapping="$2"
+    local workspace="$3"
+
+    # Collect all real window IDs in DFS order
+    local dfs_window_ids=()
+    collect_dfs_window_ids "$root_container" "$mapping" dfs_window_ids
+
+    local count=${#dfs_window_ids[@]}
+    if [[ $count -eq 0 ]]; then
+        debug "reorder: no windows to reorder"
+        return
+    fi
+
+    debug "reorder: moving $count windows to temp for reordering"
+
+    # Move all windows to temp (reverse order to avoid focus issues)
+    local i
+    for (( i=count-1; i>=0; i-- )); do
+        local wid="${dfs_window_ids[$i]}"
+        if [[ -n "$wid" ]]; then
+            aerospace_move_node_to_workspace --window-id "$wid" "$TEMP_WORKSPACE"
+        fi
+    done
+
+    # Move back in DFS order — each window appends to the end of the
+    # root container, so they end up in correct spatial order
+    for wid in "${dfs_window_ids[@]}"; do
+        if [[ -n "$wid" ]]; then
+            aerospace_move_node_to_workspace --window-id "$wid" "$workspace"
+        fi
+    done
+
+    debug "reorder: $count windows repositioned in DFS order"
+}
+
+# Helper: collect real window IDs from layout tree in DFS order
+collect_dfs_window_ids() {
+    local node="$1"
+    local mapping="$2"
+    local -n _result_arr=$3
+
+    local node_type
+    node_type=$(echo "$node" | jq -r '.type // empty')
+
+    if [[ "$node_type" == "window" ]]; then
+        local original_id real_id
+        original_id=$(echo "$node" | jq -r '.["window-id"]')
+        real_id=$(echo "$mapping" | jq -r --arg id "$original_id" '.[$id] // empty')
+        if [[ -n "$real_id" ]]; then
+            _result_arr+=("$real_id")
+        fi
+    elif [[ "$node_type" == "container" ]]; then
+        local children
+        children=$(echo "$node" | jq -c '.children[]?' 2>/dev/null || echo "")
+        while IFS= read -r child; do
+            if [[ -n "$child" ]]; then
+                collect_dfs_window_ids "$child" "$mapping" _result_arr
+            fi
+        done <<< "$children"
+    fi
+}
+
 # Recursively move windows from a node (DFS order)
 move_node_windows() {
     local node="$1"

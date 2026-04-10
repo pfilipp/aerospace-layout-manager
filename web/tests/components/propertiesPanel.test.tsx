@@ -67,7 +67,7 @@ describe('PropertiesPanel', () => {
   it('shows "Select a node" when no selection', () => {
     const onUpdate = vi.fn();
     render(
-      <PropertiesPanel selectedNode={null} onUpdate={onUpdate} apps={testApps} />,
+      <PropertiesPanel selectedNode={null} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
     );
 
     expect(screen.getByText(/select a node/i)).toBeDefined();
@@ -76,19 +76,19 @@ describe('PropertiesPanel', () => {
   it('shows container properties for container node', () => {
     const onUpdate = vi.fn();
     render(
-      <PropertiesPanel selectedNode={makeContainerNode()} onUpdate={onUpdate} apps={testApps} />,
+      <PropertiesPanel selectedNode={makeContainerNode()} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
     );
 
     expect(screen.getByText(/container properties/i)).toBeDefined();
     expect(screen.getByLabelText(/layout type/i)).toBeDefined();
+    // Orientation is now displayed as a static read-only field derived from layout type
     expect(screen.getByText('Horizontal')).toBeDefined();
-    expect(screen.getByText('Vertical')).toBeDefined();
   });
 
   it('shows window properties for window node', () => {
     const onUpdate = vi.fn();
     render(
-      <PropertiesPanel selectedNode={makeWindowNode()} onUpdate={onUpdate} apps={testApps} />,
+      <PropertiesPanel selectedNode={makeWindowNode()} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
     );
 
     expect(screen.getByText(/window properties/i)).toBeDefined();
@@ -103,7 +103,7 @@ describe('PropertiesPanel', () => {
     const onUpdate = vi.fn();
 
     render(
-      <PropertiesPanel selectedNode={makeContainerNode()} onUpdate={onUpdate} apps={testApps} />,
+      <PropertiesPanel selectedNode={makeContainerNode()} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
     );
 
     const layoutSelect = screen.getByLabelText(/layout type/i);
@@ -112,6 +112,8 @@ describe('PropertiesPanel', () => {
     expect(onUpdate).toHaveBeenCalledTimes(1);
     const call = onUpdate.mock.calls[0][0] as ContainerNode;
     expect(call.layout).toBe('v_tiles');
+    // Orientation is auto-synced with layout type
+    expect(call.orientation).toBe('vertical');
   });
 
   it('editing a field calls onUpdate for window', async () => {
@@ -119,7 +121,7 @@ describe('PropertiesPanel', () => {
     const onUpdate = vi.fn();
 
     render(
-      <PropertiesPanel selectedNode={makeWindowNode()} onUpdate={onUpdate} apps={testApps} />,
+      <PropertiesPanel selectedNode={makeWindowNode()} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
     );
 
     const appNameInput = screen.getByLabelText(/app name/i);
@@ -136,7 +138,7 @@ describe('PropertiesPanel', () => {
     const onUpdate = vi.fn();
 
     render(
-      <PropertiesPanel selectedNode={makeContainerNode()} onUpdate={onUpdate} apps={testApps} />,
+      <PropertiesPanel selectedNode={makeContainerNode()} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
     );
 
     const layoutSelect = screen.getByLabelText(/layout type/i);
@@ -154,7 +156,7 @@ describe('PropertiesPanel', () => {
     const onUpdate = vi.fn();
 
     render(
-      <PropertiesPanel selectedNode={makeWindowNode()} onUpdate={onUpdate} apps={testApps} />,
+      <PropertiesPanel selectedNode={makeWindowNode()} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
     );
 
     expect((screen.getByLabelText(/app name/i) as HTMLInputElement).value).toBe('VS Code');

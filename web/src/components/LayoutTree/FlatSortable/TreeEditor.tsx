@@ -65,16 +65,6 @@ function resolveStoreNodeId(flatId: string, flatNodes: FlatNode[]): string | nul
   return getNodeIdFromTreeNode(flatNode.node);
 }
 
-/**
- * Resolve a flat path ID to the _nodeId of its parent container.
- * Returns null if no parent found.
- */
-function resolveStoreParentId(flatId: string, flatNodes: FlatNode[]): string | null {
-  const flatNode = flatNodes.find((n) => n.id === flatId);
-  if (!flatNode || !flatNode.parentId) return null;
-  return resolveStoreNodeId(flatNode.parentId, flatNodes);
-}
-
 export function TreeEditor({
   layout,
   onLayoutChange,
@@ -207,13 +197,6 @@ export function TreeEditor({
       },
     ];
   }, [contextMenu, flatNodes, deleteNode, duplicateNode, wrapNodes]);
-
-  // Determine if selected node is a container for TreeActions targeting
-  const selectedIsContainer = useMemo(() => {
-    if (!selectedNodeId) return false;
-    const node = flatNodes.find((n) => n.id === selectedNodeId);
-    return node?.node.type === 'container';
-  }, [selectedNodeId, flatNodes]);
 
   // Resolve multi-selected flat IDs to store _nodeIds for tree actions
   const multiSelectedStoreIds = useMemo(() => {

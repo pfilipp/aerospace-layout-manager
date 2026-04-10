@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { TreeNode, AppEntry, ContainerNode, Project } from './types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { TreeNode, AppEntry, ContainerNode, LayoutType, Project } from './types';
 import { Sidebar } from './components/Sidebar';
 import { TreeEditor } from './components/LayoutTree';
 import { PropertiesPanel } from './components/PropertiesPanel';
@@ -7,7 +7,7 @@ import { GenerateToolbar, StaleIndicator } from './components/GenerateToolbar';
 import { MigrationDialog } from './components/MigrationDialog';
 import { ProjectDialog } from './components/ProjectDialog';
 import { ToastContainer, addToast } from './components/Toast';
-import { useEditorStore, useKeyboardShortcuts, pushUndo, findNodeById, getNodeId, stripNodeIds } from './store';
+import { useEditorStore, useKeyboardShortcuts, pushUndo, findNodeById, findParent, getNodeId, stripNodeIds } from './store';
 import { flattenTree } from './components/LayoutTree/FlatSortable/flattenTree';
 import { useWorkspace, useApps, useModes, useOptimisticWorkspaceUpdate, useConfig } from './api/hooks';
 
@@ -19,7 +19,7 @@ function App() {
   const [projectDialogState, setProjectDialogState] = useState<Project | null | undefined>(null);
 
   // Track whether config has been modified since last generation
-  const { data: configData } = useConfig();
+  useConfig();
   // configModified tracks whether the user has made any mutations in this session
   // that would make the generated files stale
   const configModifiedRef = useRef(false);
@@ -85,6 +85,16 @@ function App() {
   // Resolve the selected TreeNode for the properties panel
   const selectedNode: TreeNode | null =
     tree && selectedNodeId ? findNodeById(tree, selectedNodeId) : null;
+
+  // Find the parent container's layout type for normalization constraints
+  const selectedParentLayout: LayoutType | null = useMemo(() => {
+    if (!tree || !selectedNodeId) return null;
+    // If the selected node IS the root, it has no parent
+    if (getNodeId(tree) === selectedNodeId) return null;
+    const parentInfo = findParent(tree, selectedNodeId);
+    if (!parentInfo) return null;
+    return parentInfo.parent.layout;
+  }, [tree, selectedNodeId]);
 
   const handleLayoutChange = useCallback(
     (newLayout: ContainerNode) => {
@@ -255,6 +265,7 @@ function App() {
         <aside className="w-72 border-l border-gray-800 p-4 overflow-y-auto">
           <PropertiesPanel
             selectedNode={selectedNode}
+            parentLayout={selectedParentLayout}
             onUpdate={handleNodeUpdate}
             apps={apps ?? {}}
           />

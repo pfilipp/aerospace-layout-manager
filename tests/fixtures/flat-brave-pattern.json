@@ -1,0 +1,29 @@
+[
+  {
+    "name": "test",
+    "type": "workspace",
+    "root-container": {
+      "type": "container",
+      "layout": "v_accordion",
+      "orientation": "vertical",
+      "children": [
+        {
+          "type": "window",
+          "app-bundle-id": "com.googlecode.iterm2",
+          "app-name": "iTerm2",
+          "title": "test-1",
+          "window-id": 1,
+          "startup": ""
+        },
+        {
+          "type": "window",
+          "app-bundle-id": "com.googlecode.iterm2",
+          "app-name": "iTerm2",
+          "title": "test-2",
+          "window-id": 2,
+          "startup": ""
+        }
+      ]
+    }
+  }
+]

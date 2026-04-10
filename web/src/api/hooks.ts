@@ -7,14 +7,11 @@ import {
   useQuery,
   useMutation,
   useQueryClient,
-  type UseQueryOptions,
 } from '@tanstack/react-query';
 import type {
-  ModeSummary,
   Mode,
   Project,
   AppEntry,
-  ResolvedWorkspace,
   ContainerNode,
   Workspace,
 } from '../types';

@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
 import type { AppEntry, ContainerNode, WindowNode } from '../../types';
 import { AppSearchDropdown } from './AppSearchDropdown';
-import { useEditorStore } from '../../store';
+import { useEditorStore, findNodeById, getNodeId } from '../../store';
+import { getDefaultChildLayout } from '../../utils/normalization';
 
 interface TreeActionsProps {
   /** Store _nodeId of the currently selected node (resolved from flat ID) */
@@ -41,7 +42,7 @@ export function TreeActions({
       return selectedStoreNodeId;
     }
     // Fall back to root container's _nodeId
-    return getNodeId(tree);
+    return getNodeId(tree) ?? null;
   }, [tree, selectedStoreNodeId, selectedIsContainer]);
 
   const handleAddApp = useCallback(
@@ -66,20 +67,29 @@ export function TreeActions({
 
   const handleAddContainer = useCallback(() => {
     const parentId = getTargetContainerId();
-    if (!parentId) return;
+    if (!parentId || !tree) return;
+
+    // Find the parent container to determine the correct child layout
+    const parentNode = findNodeById(tree, parentId);
+    const parentLayout = parentNode && parentNode.type === 'container' ? parentNode.layout : 'h_tiles';
+
+    // Auto-set opposite orientation to satisfy AeroSpace normalization
+    const childLayout = getDefaultChildLayout(parentLayout);
 
     const containerNode: ContainerNode = {
       type: 'container',
-      layout: 'h_tiles',
-      orientation: 'horizontal',
+      layout: childLayout,
+      orientation: childLayout.startsWith('h_') ? 'horizontal' : 'vertical',
       children: [],
     };
 
     addNode(parentId, containerNode);
-  }, [getTargetContainerId, addNode]);
+  }, [getTargetContainerId, addNode, tree]);
 
   const handleWrap = useCallback(() => {
     if (multiSelectedStoreIds.size === 0) return;
+    // The store's wrapNodes will auto-enforce opposite orientation,
+    // but we pass a reasonable default so flipping is minimal
     wrapNodes(Array.from(multiSelectedStoreIds), 'h_tiles');
     onClearMultiSelect();
   }, [multiSelectedStoreIds, wrapNodes, onClearMultiSelect]);
@@ -134,9 +144,3 @@ export function TreeActions({
   );
 }
 
-/**
- * Get the _nodeId from a tree node (runtime-injected field).
- */
-function getNodeId(node: { type: string }): string | null {
-  return (node as unknown as Record<string, unknown>)['_nodeId'] as string | null;
-}

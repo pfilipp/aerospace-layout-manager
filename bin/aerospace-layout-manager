@@ -94,6 +94,10 @@ main() {
         exit 1
     fi
 
+    # Pre-normalize the layout tree (AeroSpace normalization rules)
+    debug "Pre-normalizing layout tree..."
+    root_container=$(normalize_layout_tree "$root_container")
+
     local root_layout
     root_layout=$(echo "$root_container" | jq -r '.layout // "tiles"')
     log "Root layout: $root_layout"
@@ -132,6 +136,14 @@ main() {
         aerospace_layout "$root_layout"
     fi
 
+    # Step 6b: Reorder windows to match layout tree DFS order
+    # After flatten, windows may not be in the correct spatial order.
+    # Phase 1 relies on spatial adjacency for join-with, so we must
+    # ensure windows are ordered left-to-right (h_*) or top-to-bottom (v_*)
+    # matching the DFS traversal of the layout tree.
+    log "Reordering windows to match layout tree order..."
+    reorder_windows_to_dfs "$root_container" "$mapping" "$target_workspace"
+
     # Step 7: Apply layout operations in two phases
     # Phase 1: Create all nested containers via joins
     # Pass root_layout so all joins use the correct spatial arrangement
@@ -139,10 +151,28 @@ main() {
     log "Phase 1: Creating nested containers..."
     apply_layout "$root_container" "$mapping" "$target_workspace" "$root_layout" "true"
 
+    # Step 7a: Re-apply root layout after Phase 1 (T5 fix)
+    # Join operations can mutate the root container's layout type.
+    # Re-applying ensures the root layout is correct before Phase 2.
+    log "Re-applying root layout after Phase 1: $root_layout"
+    if [[ -n "$any_window" ]]; then
+        aerospace_focus --window-id "$any_window"
+        aerospace_layout "$root_layout"
+    fi
+
     # Phase 2: Apply layouts to all containers
     # Done separately to prevent layout changes from affecting joins
     log "Phase 2: Applying container layouts..."
     apply_layouts "$root_container" "$mapping" "$target_workspace" "true"
+
+    # Step 8a: Re-apply root layout after Phase 2 (T5 fix - safety net)
+    # Phase 2 layout operations on child containers could theoretically
+    # affect the root if a window is incorrectly parented.
+    log "Re-applying root layout after Phase 2: $root_layout"
+    if [[ -n "$any_window" ]]; then
+        aerospace_focus --window-id "$any_window"
+        aerospace_layout "$root_layout"
+    fi
 
     log "=========================================="
     log "Layout recreation complete!"

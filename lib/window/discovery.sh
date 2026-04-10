@@ -48,6 +48,7 @@ create_window_mapping() {
     windows=$(collect_windows "$root_container")
 
     local mapping="{}"
+    local claimed_ids=""  # Space-separated list of already-claimed real window IDs
     local missing_launchable=()
     local missing_fatal=()
 
@@ -67,11 +68,12 @@ create_window_mapping() {
         debug "Finding window: $bundle_id '$title' (original: $original_id, source: $source_workspace)"
 
         local new_id
-        new_id=$(find_window_by_bundle_and_title "$bundle_id" "$title" "$source_workspace")
+        new_id=$(find_window_by_bundle_and_title "$bundle_id" "$title" "$source_workspace" "$claimed_ids")
 
         if [[ -n "$new_id" ]]; then
             log "  Found: $bundle_id '$title' -> $new_id"
             mapping=$(echo "$mapping" | jq --arg orig "$original_id" --arg new "$new_id" '. + {($orig): $new}')
+            claimed_ids="${claimed_ids:+$claimed_ids }$new_id"
         elif [[ -n "$startup" ]]; then
             # Has a startup command — we'll try to launch it in pass 2
             missing_launchable+=("$window_info")
@@ -110,6 +112,7 @@ create_window_mapping() {
             if [[ -n "$new_id" ]]; then
                 log "  Launched: $bundle_id '$title' -> $new_id"
                 mapping=$(echo "$mapping" | jq --arg orig "$original_id" --arg new "$new_id" '. + {($orig): $new}')
+                claimed_ids="${claimed_ids:+$claimed_ids }$new_id"
             else
                 missing_fatal+=("$bundle_id: $title (launched but window never appeared)")
             fi
