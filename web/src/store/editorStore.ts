@@ -161,6 +161,63 @@ function findContainerById(
   return null;
 }
 
+// --- Flat ID resolution helpers ---
+
+/**
+ * Parse a flat ID path segment like "c-2" or "w-0" into its index.
+ * Flat IDs use the format: "root/c-{index}/w-{index}" etc.
+ */
+function parseSegmentIndex(segment: string): number {
+  const dashIdx = segment.indexOf('-');
+  if (dashIdx === -1) return -1;
+  return parseInt(segment.slice(dashIdx + 1), 10);
+}
+
+/**
+ * Resolve a flat ID (e.g., "root/c-0/w-1") to the actual tree node
+ * and its parent container + index within the current tree.
+ *
+ * Returns null if the path cannot be resolved.
+ */
+function resolveFlatId(
+  root: ContainerNode,
+  flatId: string,
+): { node: TreeNode; parent: ContainerNode | null; index: number } | null {
+  if (flatId === 'root') {
+    return { node: root, parent: null, index: 0 };
+  }
+
+  const parts = flatId.split('/');
+  if (parts[0] !== 'root') return null;
+
+  let current: ContainerNode = root;
+  for (let i = 1; i < parts.length; i++) {
+    const childIndex = parseSegmentIndex(parts[i]);
+    if (childIndex < 0 || childIndex >= current.children.length) return null;
+
+    const child = current.children[childIndex];
+    if (i === parts.length - 1) {
+      // This is the target node
+      return { node: child, parent: current, index: childIndex };
+    }
+
+    // Must be a container to continue traversal
+    if (child.type !== 'container') return null;
+    current = child;
+  }
+
+  return null;
+}
+
+/**
+ * Check if ancestorId is a path prefix of descendantId.
+ * e.g., "root/c-0" is an ancestor of "root/c-0/w-1"
+ */
+function isFlatIdAncestor(ancestorId: string, descendantId: string): boolean {
+  if (ancestorId === descendantId) return true;
+  return descendantId.startsWith(ancestorId + '/');
+}
+
 // --- Editor state interface ---
 
 export interface EditorState {
@@ -188,6 +245,11 @@ export interface EditorState {
 
   // Tree mutations (all push to undo stack)
   moveNode: (nodeId: string, targetParentId: string, targetIndex: number) => void;
+  moveNodeByFlatId: (args: {
+    sourceId: string;
+    targetId: string;
+    dropType: 'before' | 'after' | 'inside';
+  }) => void;
   addNode: (parentId: string, node: TreeNode, insertIndex?: number) => void;
   deleteNode: (nodeId: string) => void;
   duplicateNode: (nodeId: string) => void;
@@ -279,6 +341,106 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const inserted = insertNode(newTree, targetParentId, removed, targetIndex);
     if (!inserted) return;
+
+    set({ tree: newTree, ...stacks });
+  },
+
+  moveNodeByFlatId: ({ sourceId, targetId, dropType }) => {
+    const { tree, undoStack } = get();
+    if (!tree) return;
+
+    // Don't allow dragging the root
+    if (sourceId === 'root') return;
+
+    // Cycle prevention: don't allow dropping a node into its own descendant
+    if (isFlatIdAncestor(sourceId, targetId)) return;
+
+    // Resolve source and target positions in the current (unmutated) tree
+    const sourceInfo = resolveFlatId(tree, sourceId);
+    const targetInfo = resolveFlatId(tree, targetId);
+    if (!sourceInfo || !targetInfo) return;
+    if (!sourceInfo.parent) return; // source is root, already guarded above
+
+    // Determine the target parent container and raw insertion index
+    let targetInsertParent: ContainerNode;
+    let targetIndex: number;
+
+    if (dropType === 'inside') {
+      // Dropping inside a container: target must be a container
+      if (targetInfo.node.type !== 'container') return;
+      targetInsertParent = targetInfo.node;
+      // Append to end of the target container
+      targetIndex = targetInsertParent.children.length;
+    } else {
+      // 'before' or 'after': insert relative to the target node in its parent
+      if (!targetInfo.parent) return; // target is root, can't insert before/after root
+      targetInsertParent = targetInfo.parent;
+      targetIndex = dropType === 'before' ? targetInfo.index : targetInfo.index + 1;
+    }
+
+    // Check if source and target share the same parent container (by identity)
+    const isSameParentMove = sourceInfo.parent === targetInsertParent;
+
+    if (isSameParentMove) {
+      // Apply same-parent index adjustment rules from the design doc
+      if (sourceInfo.index === targetIndex) return; // Case 4: no-op
+
+      if (sourceInfo.index < targetIndex) {
+        // Case 2: moving forward — removal shifts subsequent indices down by 1
+        targetIndex = targetIndex - 1;
+      }
+      // Case 3: moving backward — no adjustment needed
+
+      // After adjustment, check again for no-op
+      if (sourceInfo.index === targetIndex) return;
+    }
+
+    // Push undo before mutating
+    const stacks = pushUndo(tree, undoStack);
+    const newTree = cloneTree(tree);
+
+    // Re-resolve positions in the cloned tree (structuredClone creates new objects,
+    // so we need fresh references). Resolve BOTH before any mutations.
+    const clonedSourceInfo = resolveFlatId(newTree, sourceId);
+    if (!clonedSourceInfo || !clonedSourceInfo.parent) return;
+
+    // For the target, we need a reference to the target parent container in the
+    // cloned tree. We resolve it BEFORE removing the source to avoid stale paths.
+    let clonedTargetParent: ContainerNode;
+    if (isSameParentMove) {
+      // Same parent — source and target share a parent, use the cloned source's parent
+      clonedTargetParent = clonedSourceInfo.parent;
+    } else if (dropType === 'inside') {
+      const clonedTargetInfo = resolveFlatId(newTree, targetId);
+      if (!clonedTargetInfo || clonedTargetInfo.node.type !== 'container') return;
+      clonedTargetParent = clonedTargetInfo.node;
+    } else {
+      const clonedTargetInfo = resolveFlatId(newTree, targetId);
+      if (!clonedTargetInfo || !clonedTargetInfo.parent) return;
+      clonedTargetParent = clonedTargetInfo.parent;
+    }
+
+    // Remove source node from its parent
+    const [removedNode] = clonedSourceInfo.parent.children.splice(clonedSourceInfo.index, 1);
+    if (!removedNode) return;
+
+    // Normalize orientation if moving a container into a new parent
+    if (removedNode.type === 'container') {
+      const corrected = enforceOppositeOrientation(clonedTargetParent.layout, removedNode.layout);
+      if (corrected !== removedNode.layout) {
+        removedNode.layout = corrected;
+        removedNode.orientation = getOrientation(corrected);
+      }
+      // Also fix children that would violate with the moved container's (possibly corrected) layout
+      const childViolations = findChildViolations(removedNode.layout, removedNode.children);
+      if (childViolations.length > 0) {
+        removedNode.children = fixChildViolations(removedNode.layout, removedNode.children);
+      }
+    }
+
+    // Clamp index to valid range and insert
+    const clampedIndex = Math.max(0, Math.min(targetIndex, clonedTargetParent.children.length));
+    clonedTargetParent.children.splice(clampedIndex, 0, removedNode);
 
     set({ tree: newTree, ...stacks });
   },

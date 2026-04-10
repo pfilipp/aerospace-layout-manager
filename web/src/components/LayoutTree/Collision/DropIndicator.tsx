@@ -1,22 +1,26 @@
 /**
  * Visual drop indicators for the drag-and-drop tree editor.
  *
- * Two indicator types:
- * 1. BetweenIndicator: a horizontal line showing where a node will be inserted
- *    between siblings (renders for 'before' and 'after' drop targets).
- * 2. ContainerHighlight: a highlight/outline on a container when a node will
- *    be dropped inside it (renders for 'inside' drop targets).
+ * Three indicator types:
+ * 1. BetweenIndicator: a horizontal blue line with circle endpoint showing where
+ *    a node will be inserted between siblings (renders for 'before'/'after' drop targets).
+ * 2. ContainerBodyHighlight: a dashed blue border + translucent blue background
+ *    on the full container body when a node will be dropped inside it.
+ * 3. InsertionLine: a thin line between children at the resolved index when
+ *    an 'inside' drop target has a specific insertIndex.
  *
- * These are rendered as absolutely-positioned overlays on top of tree nodes.
+ * All indicators use absolute positioning within relative containers so they
+ * do not shift layout.
+ *
+ * Drop target is read from DropTargetContext (not passed as a prop).
  */
 
-import type { DropTarget } from './types';
+import { useDropTarget } from './DropTargetContext';
+import { useDndState } from '../../DndProvider';
 
 const INDENT_PX = 24;
 
-interface DropIndicatorProps {
-  /** The current drop target, or null when not dragging over anything */
-  dropTarget: DropTarget | null;
+interface NodeDropIndicatorProps {
   /** The FlatNode ID of the node this indicator is attached to */
   nodeId: string;
   /** Depth of the node (for indentation) */
@@ -31,27 +35,27 @@ interface DropIndicatorProps {
 
 /**
  * Renders a drop indicator relative to a specific tree node.
- * Place this component inside each tree node's wrapper.
+ * Place this component inside each tree node's wrapper (which must have position: relative).
+ *
+ * Reads the current drop target from DropTargetContext reactively.
+ *
  * It renders when:
- * 1. The dropTarget matches this node's ID directly (before/after/inside)
- * 2. This node is a child of the targeted container at the insertion index
+ * 1. The dropTarget matches this node's ID directly (before/after)
+ * 2. This node is a child of the targeted container at the insertion index (inside-with-position)
  */
 export function DropIndicator({
-  dropTarget,
   nodeId,
   depth,
-  isContainer,
+  isContainer: _isContainer,
   parentId,
   indexInParent,
-}: DropIndicatorProps) {
+}: NodeDropIndicatorProps) {
+  const dropTarget = useDropTarget();
+
   if (!dropTarget) return null;
 
-  // Direct target match
+  // Direct target match for before/after
   if (dropTarget.targetId === nodeId) {
-    if (dropTarget.type === 'inside' && isContainer) {
-      return <ContainerHighlight depth={depth} />;
-    }
-
     if (dropTarget.type === 'before') {
       return <BetweenIndicator position="top" depth={depth} />;
     }
@@ -76,8 +80,61 @@ export function DropIndicator({
 }
 
 /**
+ * Renders a highlight on the container body when drop target is "inside" this container.
+ * Place this component inside the ContainerBodyDroppable wrapper.
+ *
+ * Shows:
+ * - Dashed blue border + translucent blue background on the full body area
+ * - Optionally, a thin insertion line between children at the resolved index
+ *   (handled by DropIndicator on individual children)
+ */
+export function ContainerBodyHighlight({
+  flatNodeId,
+  depth,
+}: {
+  flatNodeId: string;
+  depth: number;
+}) {
+  const dropTarget = useDropTarget();
+  const { activeDragId } = useDndState();
+  const isDragging = activeDragId != null;
+
+  if (!isDragging) return null;
+
+  // Active when dropping "inside" this container, OR when the drop target
+  // is before/after a direct child of this container (the user is clearly
+  // interacting within this container's body area).
+  const isActiveTarget =
+    dropTarget != null && (
+      (dropTarget.type === 'inside' && dropTarget.targetId === flatNodeId) ||
+      (dropTarget.targetId.startsWith(flatNodeId + '/') &&
+        // Direct child only — no deeper descendants
+        !dropTarget.targetId.slice(flatNodeId.length + 1).includes('/'))
+    );
+
+  if (isActiveTarget) {
+    // Actively hovered — strong highlight
+    return (
+      <div
+        className="absolute top-0 right-0 bottom-0 pointer-events-none z-30 border-2 border-blue-500 border-dashed rounded-md bg-blue-500/10"
+      style={{ left: (depth + 1) * INDENT_PX }}
+      />
+    );
+  }
+
+  // Not hovered but drag is active — subtle "available" indicator
+  return (
+    <div
+      className="absolute top-0 right-0 bottom-0 pointer-events-none z-20 border border-gray-600 border-dashed rounded-md"
+      style={{ left: (depth + 1) * INDENT_PX }}
+    />
+  );
+}
+
+/**
  * A horizontal line indicator showing insertion point between siblings.
  * Renders at the top or bottom edge of the node.
+ * Uses absolute positioning so it does not shift layout.
  */
 function BetweenIndicator({
   position,
@@ -111,25 +168,5 @@ function BetweenIndicator({
         }}
       />
     </div>
-  );
-}
-
-/**
- * A highlight outline on a container indicating the node will be dropped inside.
- * Renders as a border overlay around the entire container.
- */
-function ContainerHighlight({ depth }: { depth: number }) {
-  const leftOffset = depth * INDENT_PX;
-
-  return (
-    <div
-      className="absolute pointer-events-none z-40 border-2 border-blue-500 border-dashed rounded-md bg-blue-500/10"
-      style={{
-        left: leftOffset,
-        right: 0,
-        top: 0,
-        bottom: 0,
-      }}
-    />
   );
 }

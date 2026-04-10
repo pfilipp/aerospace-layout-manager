@@ -1,25 +1,21 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import type { DragEndEvent, DragOverEvent } from '@dnd-kit/core';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import type { DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { useDndMonitor } from '@dnd-kit/core';
 import type { ContainerNode, WindowNode } from '../../../types';
 import type { FlatNode } from '../types';
-import { flattenTree, reorderWithinParent, moveNodeBetweenContainers } from './flattenTree';
+import { flattenTree } from './flattenTree';
 import { SortableNodeWrapper } from './TreeNode';
 import { RecursiveContainer } from '../Recursive/RecursiveContainer';
-import {
-  createTreeCollisionDetection,
-  getCurrentDropTarget,
-  setCurrentDropTarget,
-} from '../Collision/collisionDetection';
-import type { DropTarget } from '../Collision/types';
+import { useDropTarget, useDropTargetActions } from '../Collision/DropTargetContext';
 import { TreeActions } from '../TreeActions';
 import { ContextMenu } from '../ContextMenu';
 import type { ContextMenuAction } from '../ContextMenu';
 import { useEditorStore } from '../../../store';
-import { useDndState, useDndRegistration } from '../../DndProvider';
+import { useDndState, useDndFlatNodesRef } from '../../DndProvider';
 
 interface TreeEditorProps {
   /** The root container of the layout tree */
@@ -59,49 +55,43 @@ function resolveStoreNodeId(flatId: string, flatNodes: FlatNode[]): string | nul
 
 export function TreeEditor({
   layout,
-  onLayoutChange,
+  onLayoutChange: _onLayoutChange,
   selectedNodeId,
   onSelectNode,
 }: TreeEditorProps) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
-  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
+
+  // Read the current drop target reactively from DropTargetContext
+  const dropTarget = useDropTarget();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   // Shared DnD state from DndProvider
   const { activeDragId } = useDndState();
-  const { registerDragEndHandler, registerDragOverHandler, registerCollisionDetection } = useDndRegistration();
+
+  // Get the flatNodesRef from DndProvider to keep collision detection data fresh
+  const flatNodesRef = useDndFlatNodesRef();
+
+  // Drop target actions for clearing after drag-end
+  const { clearDropTarget } = useDropTargetActions();
 
   // Store actions for context menu and tree manipulation
   const deleteNode = useEditorStore((s) => s.deleteNode);
   const duplicateNode = useEditorStore((s) => s.duplicateNode);
   const wrapNodes = useEditorStore((s) => s.wrapNodes);
   const addNode = useEditorStore((s) => s.addNode);
+  const moveNodeByFlatId = useEditorStore((s) => s.moveNodeByFlatId);
 
   const flatNodes = useMemo(
     () => flattenTree(layout, collapsedIds),
     [layout, collapsedIds],
   );
 
-  // Refs for collision detection (must be fresh on each call)
-  const flatNodesRef = useRef(flatNodes);
-  flatNodesRef.current = flatNodes;
-  const activeDragIdRef = useRef(activeDragId);
-  activeDragIdRef.current = activeDragId;
-
-  const collisionDetection = useMemo(
-    () =>
-      createTreeCollisionDetection(
-        () => flatNodesRef.current,
-        () => activeDragIdRef.current,
-      ),
-    [],
-  );
-
-  // Register collision detection with DndProvider
+  // Keep DndProvider's flatNodesRef in sync so collision detection has fresh data.
+  // DndProvider owns the collision detection function and reads flatNodes from this ref.
   useEffect(() => {
-    registerCollisionDetection(collisionDetection);
-  }, [collisionDetection, registerCollisionDetection]);
+    flatNodesRef.current = flatNodes;
+  }, [flatNodes, flatNodesRef]);
 
   const nodeIds = useMemo(
     () => flatNodes.map((n) => n.id),
@@ -215,115 +205,95 @@ export function TreeEditor({
     setMultiSelectedIds(new Set());
   }, []);
 
-  // Register drag-over handler with DndProvider
-  const handleDragOver = useCallback((_event: DragOverEvent) => {
-    const target = getCurrentDropTarget();
-    setDropTarget(target);
-  }, []);
-
-  useEffect(() => {
-    registerDragOverHandler(handleDragOver);
-    return () => registerDragOverHandler(null);
-  }, [handleDragOver, registerDragOverHandler]);
+  // Drop target is now read reactively from DropTargetContext (via useDropTarget above).
+  // No need for a drag-over handler to poll the module global.
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
-      const resolvedDropTarget = getCurrentDropTarget();
-      setDropTarget(null);
-      setCurrentDropTarget(null);
+      // Read the final drop target from DropTargetContext (set by DndProvider's onDragOver).
+      const resolvedDropTarget = dropTarget;
 
       const { active, over } = event;
-      if (!over) return;
+
+      // Use event.over only as a boolean "did collision occur" check.
+      // If null, no collision occurred — abort.
+      if (!over) {
+        clearDropTarget();
+        return;
+      }
 
       const activeId = String(active.id);
-      const overId = String(over.id);
 
-      // Handle app drops from sidebar
-      if (activeId.startsWith('app-entry:')) {
-        const appData = active.data.current as { bundleId: string; app: { name: string; defaultStartup?: string } } | undefined;
-        if (!appData) return;
+      try {
+        // Handle app drops from sidebar
+        if (activeId.startsWith('app-entry:')) {
+          const appData = active.data.current as { bundleId: string; app: { name: string; defaultStartup?: string } } | undefined;
+          if (!appData) return;
 
-        // Find the target container
-        const overNode = flatNodes.find((n) => n.id === overId);
-        if (!overNode) return;
-
-        const targetFlatId = overNode.node.type === 'container'
-          ? overId
-          : overNode.parentId ?? 'root';
-        const targetStoreId = resolveStoreNodeId(targetFlatId, flatNodes)
-          ?? getNodeIdFromTreeNode(layout);
-        if (!targetStoreId) return;
-
-        const windowNode: WindowNode = {
-          type: 'window',
-          'app-bundle-id': appData.bundleId,
-          'app-name': appData.app.name,
-          startup: appData.app.defaultStartup || '',
-          title: '',
-          'window-id': 0,
-        };
-
-        addNode(targetStoreId, windowNode, resolvedDropTarget?.insertIndex);
-        return;
-      }
-
-      if (active.id === over.id) return;
-
-      const activeNode = flatNodes.find((n) => n.id === activeId);
-      const overNode = flatNodes.find((n) => n.id === overId);
-
-      if (!activeNode || !overNode) return;
-
-      // Use the resolved drop target from collision detection if available
-      if (resolvedDropTarget && resolvedDropTarget.targetId === overId) {
-        if (resolvedDropTarget.type === 'inside' && overNode.node.type === 'container') {
-          const newLayout = moveNodeBetweenContainers(
-            layout,
-            flatNodes,
-            activeId,
-            overId,
-            resolvedDropTarget.insertIndex,
-          );
-          if (newLayout !== layout) {
-            onLayoutChange(newLayout);
+          // Determine target container from drop target context
+          let targetFlatId: string;
+          if (resolvedDropTarget) {
+            // For 'inside' drops, the target IS the container
+            // For 'before'/'after' drops, find the parent of the target node
+            if (resolvedDropTarget.type === 'inside') {
+              targetFlatId = resolvedDropTarget.targetId;
+            } else {
+              const targetNode = flatNodes.find((n) => n.id === resolvedDropTarget.targetId);
+              targetFlatId = targetNode?.parentId ?? 'root';
+            }
+          } else {
+            // Fallback: use over ID to find a container
+            const overId = String(over.id);
+            const overNode = flatNodes.find((n) => n.id === overId);
+            if (!overNode) return;
+            targetFlatId = overNode.node.type === 'container'
+              ? overId
+              : overNode.parentId ?? 'root';
           }
+
+          const targetStoreId = resolveStoreNodeId(targetFlatId, flatNodes)
+            ?? getNodeIdFromTreeNode(layout);
+          if (!targetStoreId) return;
+
+          const windowNode: WindowNode = {
+            type: 'window',
+            'app-bundle-id': appData.bundleId,
+            'app-name': appData.app.name,
+            startup: appData.app.defaultStartup || '',
+            title: '',
+            'window-id': 0,
+          };
+
+          addNode(targetStoreId, windowNode, resolvedDropTarget?.insertIndex);
           return;
         }
-      }
 
-      // Same-parent reorder
-      if (activeNode.parentId === overNode.parentId) {
-        const newLayout = reorderWithinParent(
-          layout,
-          flatNodes,
-          activeId,
-          overId,
-        );
-        if (newLayout !== layout) {
-          onLayoutChange(newLayout);
-        }
-        return;
-      }
+        // Tree node move — use moveNodeByFlatId store action
+        if (!resolvedDropTarget) return;
 
-      // Cross-container move
-      const newLayout = moveNodeBetweenContainers(
-        layout,
-        flatNodes,
-        activeId,
-        overId,
-      );
-      if (newLayout !== layout) {
-        onLayoutChange(newLayout);
+        // Don't move a node onto itself
+        if (activeId === resolvedDropTarget.targetId) return;
+
+        moveNodeByFlatId({
+          sourceId: activeId,
+          targetId: resolvedDropTarget.targetId,
+          dropType: resolvedDropTarget.type,
+        });
+      } finally {
+        // Always clear the drop target after handling
+        clearDropTarget();
       }
     },
-    [layout, flatNodes, onLayoutChange, addNode],
+    [layout, flatNodes, addNode, dropTarget, clearDropTarget, moveNodeByFlatId],
   );
 
-  // Register drag-end handler with DndProvider
-  useEffect(() => {
-    registerDragEndHandler(handleDragEnd);
-    return () => registerDragEndHandler(null);
-  }, [handleDragEnd, registerDragEndHandler]);
+  // Listen for drag-end events directly via useDndMonitor.
+  // This replaces the old ref-registration pattern (registerDragEndHandler).
+  // useDndMonitor handlers fire synchronously before DndContext's onDragEnd,
+  // so dropTarget is still available when handleDragEnd reads it.
+  useDndMonitor({
+    onDragEnd: handleDragEnd,
+  });
 
   /**
    * Render function that wraps content in a dnd-kit SortableNodeWrapper.
@@ -371,7 +341,6 @@ export function TreeEditor({
             onToggleCollapse={handleToggleCollapse}
             flatNodes={flatNodes}
             renderSortableWrapper={renderSortableWrapper}
-            dropTarget={dropTarget}
             multiSelectedIds={multiSelectedIds}
             onContextMenu={handleContextMenu}
             activeDragId={activeDragId}

@@ -90,14 +90,20 @@ export function SortableNodeWrapper({ flatNode, children }: SortableNodeWrapperP
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: flatNode.id });
+  } = useSortable({
+    id: flatNode.id,
+    data: {
+      type: 'tree-node',
+      flatNode,
+    },
+  });
 
   const style: React.CSSProperties = {
     transform: transform
       ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
       : undefined,
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0.3 : 1,
   };
 
   return (

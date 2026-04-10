@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { useDroppable } from '@dnd-kit/core';
 import type { ContainerNode, WindowNode } from '../../../types';
 import type { FlatNode } from '../types';
 import { DropIndicator } from '../Collision/DropIndicator';
-import type { DropTarget } from '../Collision/types';
+import { useDropTarget } from '../Collision/DropTargetContext';
 import { getNodeId } from '../../../store/editorStore';
+import { useDndState } from '../../DndProvider';
 
 const INDENT_PX = 24;
 
@@ -37,16 +39,12 @@ interface RecursiveContainerProps {
     flatNode: FlatNode,
     children: React.ReactNode,
   ) => React.ReactNode;
-  /** Current drop target for rendering indicators */
-  dropTarget: DropTarget | null;
   /** Set of multi-selected node IDs */
   multiSelectedIds?: Set<string>;
   /** Callback for right-click context menu */
   onContextMenu?: (id: string, event: React.MouseEvent) => void;
   /** FlatNode ID of the currently dragged node (null when not dragging) */
   activeDragId?: string | null;
-  /** Callback when a drop zone is entered during native drag */
-  onDropZoneEnter?: (containerId: string, insertIndex: number) => void;
 }
 
 /**
@@ -66,17 +64,15 @@ export function RecursiveContainer({
   onToggleCollapse,
   flatNodes,
   renderSortableWrapper,
-  dropTarget,
   multiSelectedIds,
   onContextMenu,
   activeDragId,
-  onDropZoneEnter,
 }: RecursiveContainerProps) {
+  const dropTarget = useDropTarget();
   const isCollapsed = collapsedIds.has(flatNodeId);
   const thisFlatNode = flatNodes.find((n) => n.id === flatNodeId);
   const isMultiSelected = multiSelectedIds?.has(flatNodeId) ?? false;
   const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isDragging = activeDragId != null;
 
   // Auto-expand collapsed containers when a drag hovers over them
   const isDragTarget = dropTarget?.type === 'inside' && dropTarget?.targetId === flatNodeId;
@@ -105,7 +101,6 @@ export function RecursiveContainer({
       onContextMenu={(e) => onContextMenu?.(flatNodeId, e)}
     >
       <DropIndicator
-        dropTarget={dropTarget}
         nodeId={flatNodeId}
         depth={depth}
         isContainer={true}
@@ -129,11 +124,7 @@ export function RecursiveContainer({
     return <>{containerHeader}</>;
   }
 
-  // Check if this container is the active drop target
-  const isDropTarget = dropTarget?.type === 'inside' && dropTarget?.targetId === flatNodeId;
-  const dropInsertIndex = isDropTarget ? dropTarget?.insertIndex : undefined;
-
-  // Render children recursively with connecting line and drop zones
+  // Render children recursively with connecting line
   const childElements = container.children.map((child, index) => {
     const childId =
       child.type === 'container'
@@ -145,17 +136,6 @@ export function RecursiveContainer({
     if (child.type === 'container') {
       return (
         <div key={childId} className="relative">
-          {/* Drop zone overlay at top edge */}
-          {isDragging && (
-            <DropZone
-              containerId={flatNodeId}
-              insertIndex={index}
-              depth={depth + 1}
-              isActive={dropInsertIndex === index}
-              onDropZoneEnter={onDropZoneEnter}
-              position="top"
-            />
-          )}
           <NestingLine depth={depth + 1} isLast={isLastChild} />
           <RecursiveContainer
             container={child}
@@ -167,23 +147,10 @@ export function RecursiveContainer({
             onToggleCollapse={onToggleCollapse}
             flatNodes={flatNodes}
             renderSortableWrapper={renderSortableWrapper}
-            dropTarget={dropTarget}
             multiSelectedIds={multiSelectedIds}
             onContextMenu={onContextMenu}
             activeDragId={activeDragId}
-            onDropZoneEnter={onDropZoneEnter}
           />
-          {/* Drop zone after last child */}
-          {isDragging && isLastChild && (
-            <DropZone
-              containerId={flatNodeId}
-              insertIndex={index + 1}
-              depth={depth + 1}
-              isActive={dropInsertIndex === index + 1}
-              onDropZoneEnter={onDropZoneEnter}
-              position="bottom"
-            />
-          )}
         </div>
       );
     }
@@ -196,17 +163,6 @@ export function RecursiveContainer({
 
     return (
       <div key={childId} className="relative">
-        {/* Drop zone overlay at top edge */}
-        {isDragging && (
-          <DropZone
-            containerId={flatNodeId}
-            insertIndex={index}
-            depth={depth + 1}
-            isActive={dropInsertIndex === index}
-            onDropZoneEnter={onDropZoneEnter}
-            position="top"
-          />
-        )}
         <NestingLine depth={depth + 1} isLast={isLastChild} />
         {renderSortableWrapper(
           childFlatNode,
@@ -216,7 +172,6 @@ export function RecursiveContainer({
             onContextMenu={(e) => onContextMenu?.(childId, e)}
           >
             <DropIndicator
-              dropTarget={dropTarget}
               nodeId={childId}
               depth={depth + 1}
               isContainer={false}
@@ -231,17 +186,6 @@ export function RecursiveContainer({
               onSelect={(e) => onSelectNode(getNodeId(child) ?? childId, e)}
             />
           </div>,
-        )}
-        {/* Drop zone after last child */}
-        {isDragging && isLastChild && (
-          <DropZone
-            containerId={flatNodeId}
-            insertIndex={index + 1}
-            depth={depth + 1}
-            isActive={dropInsertIndex === index + 1}
-            onDropZoneEnter={onDropZoneEnter}
-            position="bottom"
-          />
         )}
       </div>
     );
@@ -262,7 +206,16 @@ export function RecursiveContainer({
             }}
           />
         )}
-        {childElements}
+        {container.children.length === 0 && (
+          <EmptyContainerPlaceholder flatNodeId={flatNodeId} depth={depth} />
+        )}
+        {container.children.length > 0 ? (
+          <ContainerBodyDroppable flatNodeId={flatNodeId}>
+            {childElements}
+          </ContainerBodyDroppable>
+        ) : (
+          childElements
+        )}
       </div>
     </>
   );
@@ -424,53 +377,87 @@ function WindowRow({ node, depth, isSelected, isMultiSelected, onSelect }: Windo
 }
 
 /**
- * Visible drop zone rendered between children during drag.
- * Uses absolute positioning so it doesn't shift the layout.
- * Sits as a thin overlay at the top edge of its sibling element.
+ * Wraps the children area of an expanded container as a dnd-kit droppable.
+ * This makes the entire body area a valid "inside" drop target, so users
+ * can drop nodes anywhere in the container's content area (not just on the header).
+ *
+ * Only used for containers that have children -- empty containers use
+ * EmptyContainerPlaceholder with `empty:{id}` instead.
  */
-function DropZone({
-  containerId,
-  insertIndex,
-  depth,
-  isActive,
-  onDropZoneEnter,
-  position,
+function ContainerBodyDroppable({
+  flatNodeId,
+  children,
 }: {
-  containerId: string;
-  insertIndex: number;
-  depth: number;
-  isActive: boolean;
-  onDropZoneEnter?: (containerId: string, insertIndex: number) => void;
-  /** 'top' for before-child zones, 'bottom' for the zone after the last child */
-  position: 'top' | 'bottom';
+  flatNodeId: string;
+  children: React.ReactNode;
 }) {
+  const { setNodeRef } = useDroppable({
+    id: `body:${flatNodeId}`,
+    data: { type: 'container-body', containerId: flatNodeId },
+  });
+  const dropTarget = useDropTarget();
+  const { activeDragId } = useDndState();
+  const isDragging = activeDragId != null;
+
+  // Active when dropping "inside" this container, OR when the drop target
+  // is before/after a direct child of this container.
+  const isActiveTarget =
+    isDragging && dropTarget != null && (
+      (dropTarget.type === 'inside' && dropTarget.targetId === flatNodeId) ||
+      (dropTarget.targetId.startsWith(flatNodeId + '/') &&
+        !dropTarget.targetId.slice(flatNodeId.length + 1).includes('/'))
+    );
+
+  const highlightClass = isActiveTarget
+    ? 'border-2 border-blue-500 border-dashed rounded-md bg-blue-500/10 pb-8'
+    : isDragging
+      ? 'border border-gray-600 border-dashed rounded-md'
+      : '';
+
   return (
     <div
-      data-drop-zone={`${containerId}:${insertIndex}`}
-      data-node-id={containerId}
-      className="absolute left-0 right-0 z-30"
-      style={{
-        [position]: -6,
-        height: 12,
-        paddingLeft: depth * INDENT_PX + 20,
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onDropZoneEnter?.(containerId, insertIndex);
-      }}
+      ref={setNodeRef}
+      className={`relative ${highlightClass}`}
     >
-      <div
-        className={`
-          h-full rounded transition-colors duration-100
-          ${isActive
-            ? 'bg-blue-500/30 border border-dashed border-blue-400'
-            : 'border border-dashed border-transparent hover:border-blue-500/40 hover:bg-blue-500/10'
-          }
-        `}
-      >
-        <div className={`h-0.5 mt-[5px] rounded-full mx-1 ${isActive ? 'bg-blue-400' : 'bg-transparent'}`} />
-      </div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Placeholder rendered inside empty containers.
+ * Registered as a dnd-kit droppable so collision detection can target it.
+ * Shows "Drop here" during active drags, "Empty" when idle.
+ */
+function EmptyContainerPlaceholder({
+  flatNodeId,
+  depth,
+}: {
+  flatNodeId: string;
+  depth: number;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `empty:${flatNodeId}`,
+    data: { type: 'empty-container', containerId: flatNodeId },
+  });
+  const { activeDragId } = useDndState();
+  const isDragging = activeDragId != null;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ paddingLeft: (depth + 1) * INDENT_PX + 8 }}
+      className={`
+        my-1 mx-2 py-3 rounded border-2 border-dashed text-center text-xs
+        ${isOver
+          ? 'border-blue-400 bg-blue-500/15 text-blue-300'
+          : isDragging
+            ? 'border-gray-600 bg-gray-800/30 text-gray-500'
+            : 'border-gray-800 text-gray-600'
+        }
+      `}
+    >
+      {isDragging ? 'Drop here' : 'Empty'}
     </div>
   );
 }
