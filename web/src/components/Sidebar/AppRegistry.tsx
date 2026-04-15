@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { useApps, useDiscoverApps } from '../../api/hooks';
 import { addToast } from '../Toast';
@@ -10,6 +11,7 @@ interface AppRegistryProps {
 export function AppRegistry({ onSelectApp }: AppRegistryProps) {
   const { data: apps, isLoading, error } = useApps();
   const discoverMutation = useDiscoverApps();
+  const [search, setSearch] = useState('');
 
   const handleDiscover = () => {
     discoverMutation.mutate(undefined, {
@@ -26,9 +28,16 @@ export function AppRegistry({ onSelectApp }: AppRegistryProps) {
     });
   };
 
-  const appEntries = apps
-    ? Object.entries(apps).sort(([, a], [, b]) => a.name.localeCompare(b.name))
-    : [];
+  const searchLower = search.toLowerCase();
+  const allEntries = apps ? Object.entries(apps) : [];
+  const appEntries = allEntries
+    .filter(
+      ([bundleId, app]) =>
+        !searchLower ||
+        app.name.toLowerCase().includes(searchLower) ||
+        bundleId.toLowerCase().includes(searchLower),
+    )
+    .sort(([, a], [, b]) => a.name.localeCompare(b.name));
 
   return (
     <div className="mb-4">
@@ -46,6 +55,16 @@ export function AppRegistry({ onSelectApp }: AppRegistryProps) {
         </button>
       </div>
 
+      {!isLoading && !error && allEntries.length > 0 && (
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search apps…"
+          className="w-full px-2 py-1 mb-2 bg-gray-800 border border-gray-700 rounded text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-gray-600"
+        />
+      )}
+
       {error && (
         <p className="text-xs text-red-400 mb-2">Failed to load apps</p>
       )}
@@ -58,11 +77,15 @@ export function AppRegistry({ onSelectApp }: AppRegistryProps) {
         </div>
       )}
 
-      {!isLoading && appEntries.length === 0 && (
+      {!isLoading && allEntries.length === 0 && (
         <p className="text-xs text-gray-500">No apps in registry</p>
       )}
 
-      {!isLoading && (
+      {!isLoading && allEntries.length > 0 && appEntries.length === 0 && (
+        <p className="text-xs text-gray-500">No apps match "{search}"</p>
+      )}
+
+      {!isLoading && appEntries.length > 0 && (
         <ul className="space-y-0.5 max-h-48 overflow-y-auto">
           {appEntries.map(([bundleId, app]) => (
             <DraggableAppItem
