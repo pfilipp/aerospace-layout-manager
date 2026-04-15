@@ -191,13 +191,13 @@ handle_test_cli() {
 
 # Get current workspace tree as JSON
 get_tree() {
-    aerospace tree --workspace "$TEST_WS" 2>/dev/null
+    aerospace tree --json --workspace "$TEST_WS" 2>/dev/null
 }
 
 # Get tree for a specific workspace
 get_workspace_tree() {
     local ws="${1:-$TEST_WS}"
-    aerospace tree --workspace "$ws" 2>/dev/null
+    aerospace tree --json --workspace "$ws" 2>/dev/null
 }
 
 # Pretty print tree for debugging
@@ -280,202 +280,12 @@ get_focused_window() {
 }
 
 #---------------------------------------------------------------------------
-# Tree Structure Extraction (for comparison)
+# Tree Structure Extraction & Comparison
+# (moved to lib/diff/tree_compare.sh — source it here so log_fail / log_verbose
+#  defined above take precedence over the fallbacks)
 #---------------------------------------------------------------------------
 
-# Extract a normalized structural representation from aerospace tree JSON.
-# Output: a JSON object with layout, children (recursive), window_count per
-# container, and total_windows. Window identity is ignored -- only counts
-# and structure matter.
-#
-# Usage: echo "$tree_json" | extract_tree_structure
-extract_tree_structure() {
-    jq '
-        def structure:
-            if .type == "workspace" then
-                ."root-container" | structure
-            elif .type == "container" then
-                {
-                    type: "container",
-                    layout: .layout,
-                    children: [(.children // []) | .[] | select(.type == "container") | structure],
-                    window_count: [(.children // []) | .[] | select(.type == "window")] | length
-                }
-            else
-                empty
-            end;
-
-        def count_all_windows:
-            if .type == "container" then
-                .window_count + ([.children[] | count_all_windows] | add // 0)
-            else
-                0
-            end;
-
-        .[0] | structure | . + { total_windows: count_all_windows }
-    '
-}
-
-# Build expected tree structure from a fixture JSON file.
-# Applies the same structural extraction as extract_tree_structure so
-# both sides of the comparison use the same shape.
-#
-# Usage: build_expected_structure < fixture.json
-build_expected_structure() {
-    jq '
-        def structure:
-            if .type == "workspace" then
-                ."root-container" | structure
-            elif .type == "container" then
-                {
-                    type: "container",
-                    layout: .layout,
-                    children: [(.children // []) | .[] | select(.type == "container") | structure],
-                    window_count: [(.children // []) | .[] | select(.type == "window")] | length
-                }
-            else
-                empty
-            end;
-
-        def count_all_windows:
-            if .type == "container" then
-                .window_count + ([.children[] | count_all_windows] | add // 0)
-            else
-                0
-            end;
-
-        .[0] | structure | . + { total_windows: count_all_windows }
-    '
-}
-
-#---------------------------------------------------------------------------
-# Tree Comparison
-#---------------------------------------------------------------------------
-
-# Compare actual aerospace tree output against an expected JSON structure.
-#
-# Arguments:
-#   $1 - expected structure JSON (inline string or file path)
-#   $2 - actual aerospace tree JSON (inline string or file path)
-#
-# If $1/$2 start with '/' or './' they are treated as file paths; otherwise
-# as inline JSON strings.
-#
-# Returns 0 on match, 1 on mismatch. On failure, prints a diff showing
-# where expected and actual diverge.
-#
-# Usage:
-#   compare_tree_structure "$expected_json" "$actual_json"
-#   compare_tree_structure /path/to/expected.json /path/to/actual-tree.json
-compare_tree_structure() {
-    local expected_input="$1"
-    local actual_input="$2"
-
-    local expected_raw actual_raw
-    if [[ "$expected_input" == /* ]] || [[ "$expected_input" == ./* ]]; then
-        expected_raw=$(cat "$expected_input")
-    else
-        expected_raw="$expected_input"
-    fi
-    if [[ "$actual_input" == /* ]] || [[ "$actual_input" == ./* ]]; then
-        actual_raw=$(cat "$actual_input")
-    else
-        actual_raw="$actual_input"
-    fi
-
-    # Extract structure from both
-    local expected_struct actual_struct
-    expected_struct=$(echo "$expected_raw" | build_expected_structure 2>/dev/null) || {
-        log_fail "Failed to parse expected tree structure"
-        return 1
-    }
-    actual_struct=$(echo "$actual_raw" | extract_tree_structure 2>/dev/null) || {
-        log_fail "Failed to parse actual tree structure"
-        return 1
-    }
-
-    # Normalize both to sorted JSON for comparison
-    local expected_norm actual_norm
-    expected_norm=$(echo "$expected_struct" | jq -S '.')
-    actual_norm=$(echo "$actual_struct" | jq -S '.')
-
-    if [[ "$expected_norm" == "$actual_norm" ]]; then
-        log_verbose "Tree structures match"
-        return 0
-    fi
-
-    # Mismatch -- produce a detailed diff
-    log_fail "Tree structure mismatch"
-
-    echo ""
-    echo "--- Expected ---"
-    echo "$expected_norm" | jq '.'
-    echo ""
-    echo "--- Actual ---"
-    echo "$actual_norm" | jq '.'
-    echo ""
-
-    # Detailed field-by-field comparison
-    _compare_field "root layout" \
-        "$(echo "$expected_struct" | jq -r '.layout')" \
-        "$(echo "$actual_struct" | jq -r '.layout')"
-
-    _compare_field "total windows" \
-        "$(echo "$expected_struct" | jq -r '.total_windows')" \
-        "$(echo "$actual_struct" | jq -r '.total_windows')"
-
-    _compare_field "child container count" \
-        "$(echo "$expected_struct" | jq -r '.children | length')" \
-        "$(echo "$actual_struct" | jq -r '.children | length')"
-
-    _compare_field "root window count" \
-        "$(echo "$expected_struct" | jq -r '.window_count')" \
-        "$(echo "$actual_struct" | jq -r '.window_count')"
-
-    # Compare each child container
-    local expected_child_count actual_child_count
-    expected_child_count=$(echo "$expected_struct" | jq '.children | length')
-    actual_child_count=$(echo "$actual_struct" | jq '.children | length')
-
-    local max_children=$expected_child_count
-    if [[ $actual_child_count -gt $max_children ]]; then
-        max_children=$actual_child_count
-    fi
-
-    for ((i = 0; i < max_children; i++)); do
-        if [[ $i -ge $expected_child_count ]]; then
-            log_fail "  child[$i]: unexpected extra container in actual"
-            continue
-        fi
-        if [[ $i -ge $actual_child_count ]]; then
-            log_fail "  child[$i]: missing container in actual (expected: $(echo "$expected_struct" | jq -r ".children[$i].layout"))"
-            continue
-        fi
-
-        _compare_field "child[$i] layout" \
-            "$(echo "$expected_struct" | jq -r ".children[$i].layout")" \
-            "$(echo "$actual_struct" | jq -r ".children[$i].layout")"
-
-        _compare_field "child[$i] window count" \
-            "$(echo "$expected_struct" | jq -r ".children[$i].window_count")" \
-            "$(echo "$actual_struct" | jq -r ".children[$i].window_count")"
-    done
-
-    return 1
-}
-
-# Internal: compare a single field and report
-_compare_field() {
-    local label="$1"
-    local expected="$2"
-    local actual="$3"
-
-    if [[ "$expected" == "$actual" ]]; then
-        log_verbose "  $label: $expected (match)"
-    else
-        log_fail "  $label: expected=$expected actual=$actual"
-    fi
-}
+source "$TEST_REPO_ROOT/lib/diff/tree_compare.sh"
 
 #---------------------------------------------------------------------------
 # Window Provisioning

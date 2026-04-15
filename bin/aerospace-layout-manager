@@ -26,8 +26,73 @@ source "$LIB_DIR/init.sh"
 # MAIN
 # =============================================================================
 
+usage() {
+    cat <<EOF
+Usage:
+  $0 [--allow-missing] <target_workspace> [json_file]   (apply, default)
+  $0 verify <target_workspace> <json_file>              (diff only, no apply)
+  $0 apply-verify [--allow-missing] <target_workspace> <json_file>
+                                                         (apply, then diff)
+
+Stdin is accepted in place of json_file for the default apply mode.
+EOF
+}
+
+# Run the structural comparison against the live aerospace tree. Reuses
+# normalize_layout_tree so the baseline matches what the apply pipeline
+# would build -- any divergence is an aerospace-side or apply-side bug.
+#
+# Arguments: <workspace> <definition_json>
+# Returns: 0 match, 1 mismatch, 2 query/normalize error
+run_verify() {
+    local workspace="$1"
+    local definition_json="$2"
+
+    local root_container
+    root_container=$(get_root_container "$definition_json")
+    if [[ -z "$root_container" || "$root_container" == "null" ]]; then
+        error "No root-container found in definition"
+        return 2
+    fi
+
+    root_container=$(normalize_layout_tree "$root_container")
+
+    # Wrap normalized root back in workspace-array shape so build_expected_structure
+    # (which starts from .[0] and descends into root-container) can consume it.
+    local expected_wrapped
+    expected_wrapped=$(jq -n --argjson root "$root_container" \
+        '[{type:"workspace", "root-container": $root}]')
+
+    local actual_tree
+    actual_tree=$(aerospace tree --json --workspace "$workspace" 2>/dev/null || echo "")
+    if [[ -z "$actual_tree" ]]; then
+        error "Failed to query live aerospace tree for workspace $workspace"
+        return 2
+    fi
+
+    log "Comparing definition against live tree for workspace: $workspace"
+    if compare_tree_structure "$expected_wrapped" "$actual_tree"; then
+        log "Tree structures match ✓"
+        return 0
+    fi
+    return 1
+}
+
 main() {
     check_dependencies
+
+    # Detect subcommand (optional first positional)
+    local subcommand="apply"
+    case "${1:-}" in
+        verify|apply-verify)
+            subcommand="$1"
+            shift
+            ;;
+        -h|--help|help)
+            usage
+            exit 0
+            ;;
+    esac
 
     local target_workspace=""
     local json_input=""
@@ -40,6 +105,10 @@ main() {
                 ALLOW_MISSING=1
                 shift
                 ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
             *)
                 error "Unknown option: $1"
                 exit 1
@@ -49,9 +118,7 @@ main() {
 
     # Parse positional arguments
     if [[ $# -lt 1 ]]; then
-        echo "Usage: $0 [--allow-missing] <target_workspace> [json_file]"
-        echo "       $0 [--allow-missing] <target_workspace> < dump.json"
-        echo "       aerospace tree --workspace X | $0 [--allow-missing] <target_workspace>"
+        usage
         exit 1
     fi
 
@@ -64,6 +131,9 @@ main() {
             exit 1
         fi
         json_input=$(cat "$2")
+    elif [[ "$subcommand" == "verify" ]]; then
+        error "verify requires a layout JSON file (stdin not supported)"
+        exit 1
     else
         # Read from stdin
         if [[ -t 0 ]]; then
@@ -77,6 +147,12 @@ main() {
     if ! echo "$json_input" | jq empty 2>/dev/null; then
         error "Invalid JSON input"
         exit 1
+    fi
+
+    # verify-only: compare without applying
+    if [[ "$subcommand" == "verify" ]]; then
+        run_verify "$target_workspace" "$json_input"
+        exit $?
     fi
 
     log "=========================================="
@@ -171,6 +247,14 @@ main() {
     log "=========================================="
     log "Layout recreation complete!"
     log "=========================================="
+
+    # apply-verify: run the structural diff after apply
+    if [[ "$subcommand" == "apply-verify" ]]; then
+        log ""
+        log "Running post-apply verification..."
+        run_verify "$target_workspace" "$json_input"
+        exit $?
+    fi
 }
 
 main "$@"

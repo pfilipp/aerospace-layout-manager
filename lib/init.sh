@@ -43,3 +43,6 @@ source "$_ALM_LIB_DIR/window/movement.sh"
 source "$_ALM_LIB_DIR/layout/direction.sh"
 source "$_ALM_LIB_DIR/layout/phase1_joins.sh"
 source "$_ALM_LIB_DIR/layout/phase2_layouts.sh"
+
+# Diff utilities (depend on jq only)
+source "$_ALM_LIB_DIR/diff/tree_compare.sh"

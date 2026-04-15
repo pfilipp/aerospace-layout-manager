@@ -91,16 +91,18 @@ get_live_parent_layout() {
     # the target window-id, return that container's layout.
     local parent_layout
     parent_layout=$(echo "$tree_json" | jq -r --argjson wid "$window_id" '
-        # Recursive search: find the container whose direct children include wid
+        # Recursive search: find the container whose direct children include wid.
+        # Workspace nodes do not carry .children — their contents live under
+        # .["root-container"] — so descend through that before searching.
         def find_parent:
-            if .type == "container" or .type == "workspace" then
+            if .type == "workspace" then
+                (.["root-container"] // empty) | find_parent
+            elif .type == "container" then
                 (.children // []) as $kids |
-                # Check if any direct child is the target window
                 if ($kids | any(select(.type == "window" and .["window-id"] == $wid))) then
                     .layout // "tiles"
                 else
-                    # Recurse into child containers
-                    ($kids | map(select(.type == "container" or .type == "workspace")) | map(find_parent) | map(select(. != null)) | first) // null
+                    ($kids | map(select(.type == "container")) | map(find_parent) | map(select(. != null)) | first) // null
                 end
             else null
             end;

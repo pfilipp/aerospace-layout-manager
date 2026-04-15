@@ -166,10 +166,12 @@ create_dynamic_fixture() {
                 elif .type == "window" then
                     . as $w |
                     ($w["window-id"] | tostring) as $old_id |
+                    # Clear title so matching falls back to bundle-id only
+                    # (provisioned test windows carry real iTerm titles, not fixture ones)
                     if $mapping[$old_id] then
-                        $w + {"window-id": ($mapping[$old_id] | tonumber)}
+                        $w + {"window-id": ($mapping[$old_id] | tonumber), "title": ""}
                     else
-                        $w
+                        $w + {"title": ""}
                     end
                 else .
                 end

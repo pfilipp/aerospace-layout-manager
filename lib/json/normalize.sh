@@ -6,13 +6,16 @@
 # Phase 1 processing. This ensures ALM works with the tree structure
 # that AeroSpace will actually produce.
 #
-# Normalization rules:
+# Normalization rules (per AeroSpace docs):
 # 1. Same-orientation flip: If a child container has the same orientation
 #    as its parent, flip the child's orientation (h<->v) and update the
 #    layout name prefix accordingly.
 # 2. Single-child flattening: If a container has exactly 1 child, replace
 #    the container with its child in the parent's children array.
-#    Root container is exempt from flattening.
+#    The root container is exempt ONLY when its single child is a window.
+#    A root with a single CONTAINER child still has that child absorbed:
+#    root keeps its own layout, but the child's children become root's
+#    direct children.
 # =============================================================================
 
 # Prevent double-sourcing
@@ -87,8 +90,24 @@ normalize_layout_tree() {
                 end
             end;
 
-        # Start normalization from root (null parent = root level)
-        normalize(null)
+        # Root-specific absorption: per AeroSpace docs, root is exempt from
+        # single-child flattening only when that child is a window. A root
+        # with a single container child has the child absorbed: root keeps
+        # its own layout, and the grandchildren become direct root children.
+        def absorb_single_container_root:
+            if .type == "container"
+                and ((.children // []) | length) == 1
+                and (.children[0].type == "container")
+            then
+                .children[0] as $c |
+                .children = ($c.children // []) |
+                . + {"_normalized_root_absorb": true}
+            else .
+            end;
+
+        # Start normalization from root (null parent = root level),
+        # then apply root-level absorption once at the end.
+        normalize(null) | absorb_single_container_root
     ')
 
     # Log any normalization changes at debug level
@@ -100,6 +119,11 @@ normalize_layout_tree() {
     local flattens
     flattens=$(echo "$result" | jq -r '
         [.. | objects | select(._normalized_flatten) | "single-child container flattened"] | .[]
+    ' 2>/dev/null || true)
+
+    local absorbs
+    absorbs=$(echo "$result" | jq -r '
+        select(._normalized_root_absorb) | "root absorbed single container child"
     ' 2>/dev/null || true)
 
     if [[ -n "$flips" ]]; then
@@ -114,9 +138,13 @@ normalize_layout_tree() {
         done <<< "$flattens"
     fi
 
+    if [[ -n "$absorbs" ]]; then
+        debug "Normalization: $absorbs"
+    fi
+
     # Strip internal normalization markers from output
     result=$(echo "$result" | jq -c '
-        walk(if type == "object" then del(._normalized_flip, ._normalized_flatten) else . end)
+        walk(if type == "object" then del(._normalized_flip, ._normalized_flatten, ._normalized_root_absorb) else . end)
     ')
 
     echo "$result"
