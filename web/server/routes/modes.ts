@@ -50,7 +50,11 @@ export function resolveMode(
     for (const [wsName, ws] of Object.entries(mode.workspaces)) {
       const override = ws as WorkspaceOverride;
       if (override.skip) continue;
-      resolved[wsName] = ws as Workspace;
+      const workspace = ws as Workspace;
+      resolved[wsName] = {
+        ...workspace,
+        active: workspace.active ?? true,
+      };
     }
     return resolved;
   }

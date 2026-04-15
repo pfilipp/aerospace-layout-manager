@@ -23,7 +23,7 @@ get_join_direction() {
 
     local is_vertical=false
     case "$current_layout" in
-        "v_tiles"|"v_accordion"|"")
+        "v_tiles"|"v_accordion"|"tiles"|"")
             is_vertical=true
             ;;
         "h_tiles"|"h_accordion")
@@ -50,7 +50,7 @@ get_opposite_join_direction() {
 
     local is_vertical=false
     case "$current_layout" in
-        "v_tiles"|"v_accordion"|"")
+        "v_tiles"|"v_accordion"|"tiles"|"")
             is_vertical=true
             ;;
         "h_tiles"|"h_accordion")
@@ -78,7 +78,7 @@ get_live_parent_layout() {
     local window_id="$2"
 
     local tree_json
-    tree_json=$(aerospace tree --workspace "$workspace" 2>/dev/null || echo "")
+    tree_json=$(aerospace tree --json --workspace "$workspace" 2>/dev/null || echo "")
 
     if [[ -z "$tree_json" ]]; then
         debug "get_live_parent_layout: could not query tree for workspace $workspace"
