@@ -238,22 +238,45 @@ export function useDeleteProject() {
   });
 }
 
+export interface ApplyProjectChange {
+  'app-bundle-id': string;
+  'app-name': string;
+  'window-id': number;
+  oldStartup: string;
+  newStartup: string;
+  incomplete: boolean;
+}
+
+export interface ApplyProjectResponse {
+  preview?: boolean;
+  applied?: boolean;
+  project: string;
+  workspace: string;
+  mode: string;
+  changes: ApplyProjectChange[];
+}
+
 export function useApplyProject(modeName: string, wsName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { projectName: string }) =>
-      fetchJson<{ preview: Array<{ windowId: number; oldCommand: string; newCommand: string }> }>(
-        `/modes/${encodeURIComponent(modeName)}/workspaces/${encodeURIComponent(wsName)}/apply-project`,
+    mutationFn: ({ projectName, confirm }: { projectName: string; confirm?: boolean }) => {
+      const suffix = confirm ? '?confirm=true' : '';
+      return fetchJson<ApplyProjectResponse>(
+        `/modes/${encodeURIComponent(modeName)}/workspaces/${encodeURIComponent(wsName)}/apply-project${suffix}`,
         {
           method: 'POST',
-          body: JSON.stringify(data),
+          body: JSON.stringify({ project: projectName }),
         },
-      ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.workspaces(modeName) });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.workspace(modeName, wsName),
-      });
+      );
+    },
+    onSuccess: (_data, variables) => {
+      // Only invalidate on a real apply; previews shouldn't bust cache.
+      if (variables.confirm) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.workspaces(modeName) });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.workspace(modeName, wsName),
+        });
+      }
     },
   });
 }

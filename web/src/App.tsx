@@ -5,7 +5,7 @@ import { TreeEditor } from './components/LayoutTree';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { GenerateToolbar, StaleIndicator } from './components/GenerateToolbar';
 import { MigrationDialog } from './components/MigrationDialog';
-import { ProjectDialog } from './components/ProjectDialog';
+import { ProjectDialog, ApplyProjectDialog } from './components/ProjectDialog';
 import { ToastContainer, addToast } from './components/Toast';
 import { DndProvider } from './components/DndProvider';
 import { useEditorStore, useKeyboardShortcuts, pushUndo, findNodeById, findParent, getNodeId, stripNodeIds } from './store';
@@ -18,6 +18,9 @@ function App() {
 
   // Project dialog state: null = closed, undefined = create new, Project = edit
   const [projectDialogState, setProjectDialogState] = useState<Project | null | undefined>(null);
+
+  // Apply-project dialog state: the project being applied (null = closed).
+  const [applyProjectState, setApplyProjectState] = useState<Project | null>(null);
 
   // Track whether config has been modified since last generation
   useConfig();
@@ -175,9 +178,16 @@ function App() {
     setActiveWorkspace(activeMode, activeWorkspace, workspaceData.layout);
   }
 
-  const handleSelectProject = useCallback((project: Project) => {
-    console.log('Selected project:', project.name);
-  }, []);
+  const handleSelectProject = useCallback(
+    (project: Project) => {
+      if (!activeMode || !activeWorkspace) {
+        addToast('info', 'Select a workspace first to apply a project to it.');
+        return;
+      }
+      setApplyProjectState(project);
+    },
+    [activeMode, activeWorkspace],
+  );
 
   const handleAddProject = useCallback(() => {
     setProjectDialogState(undefined); // undefined = create new
@@ -199,6 +209,14 @@ function App() {
           project={projectDialogState ?? null}
           apps={apps ?? {}}
           onClose={() => setProjectDialogState(null)}
+        />
+      )}
+      {applyProjectState && activeMode && activeWorkspace && (
+        <ApplyProjectDialog
+          project={applyProjectState}
+          modeName={activeMode}
+          wsName={activeWorkspace}
+          onClose={() => setApplyProjectState(null)}
         />
       )}
       <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">

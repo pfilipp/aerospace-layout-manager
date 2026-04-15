@@ -148,6 +148,16 @@ export function TreeEditor({
     setContextMenu(null);
   }, []);
 
+  // Inline delete handler — resolves flat ID to store node ID and deletes it.
+  const handleDeleteNode = useCallback(
+    (flatId: string) => {
+      const storeId = resolveStoreNodeId(flatId, flatNodes);
+      if (!storeId) return;
+      deleteNode(storeId);
+    },
+    [flatNodes, deleteNode],
+  );
+
   // Build context menu actions for the targeted node
   const contextMenuActions: ContextMenuAction[] = useMemo(() => {
     if (!contextMenu) return [];
@@ -343,6 +353,7 @@ export function TreeEditor({
             renderSortableWrapper={renderSortableWrapper}
             multiSelectedIds={multiSelectedIds}
             onContextMenu={handleContextMenu}
+            onDeleteNode={handleDeleteNode}
             activeDragId={activeDragId}
           />
         </SortableContext>

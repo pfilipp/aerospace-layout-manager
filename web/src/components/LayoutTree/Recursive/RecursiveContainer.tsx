@@ -43,6 +43,8 @@ interface RecursiveContainerProps {
   multiSelectedIds?: Set<string>;
   /** Callback for right-click context menu */
   onContextMenu?: (id: string, event: React.MouseEvent) => void;
+  /** Callback when the inline delete icon is clicked */
+  onDeleteNode?: (id: string) => void;
   /** FlatNode ID of the currently dragged node (null when not dragging) */
   activeDragId?: string | null;
 }
@@ -66,6 +68,7 @@ export function RecursiveContainer({
   renderSortableWrapper,
   multiSelectedIds,
   onContextMenu,
+  onDeleteNode,
   activeDragId,
 }: RecursiveContainerProps) {
   const dropTarget = useDropTarget();
@@ -113,8 +116,10 @@ export function RecursiveContainer({
         isCollapsed={isCollapsed}
         isSelected={selectedNodeId === (getNodeId(container) ?? flatNodeId)}
         isMultiSelected={isMultiSelected}
+        isRoot={flatNodeId === 'root'}
         onToggle={() => onToggleCollapse(flatNodeId)}
         onSelect={(e) => onSelectNode(getNodeId(container) ?? flatNodeId, e)}
+        onDelete={onDeleteNode ? () => onDeleteNode(flatNodeId) : undefined}
       />
     </div>,
   );
@@ -149,6 +154,7 @@ export function RecursiveContainer({
             renderSortableWrapper={renderSortableWrapper}
             multiSelectedIds={multiSelectedIds}
             onContextMenu={onContextMenu}
+            onDeleteNode={onDeleteNode}
             activeDragId={activeDragId}
           />
         </div>
@@ -184,6 +190,7 @@ export function RecursiveContainer({
               isSelected={selectedNodeId === (getNodeId(child) ?? childId)}
               isMultiSelected={isChildMultiSelected}
               onSelect={(e) => onSelectNode(getNodeId(child) ?? childId, e)}
+              onDelete={onDeleteNode ? () => onDeleteNode(childId) : undefined}
             />
           </div>,
         )}
@@ -229,8 +236,10 @@ interface ContainerHeaderProps {
   isCollapsed: boolean;
   isSelected: boolean;
   isMultiSelected: boolean;
+  isRoot?: boolean;
   onToggle: () => void;
   onSelect: (e: React.MouseEvent) => void;
+  onDelete?: () => void;
 }
 
 function ContainerHeader({
@@ -239,8 +248,10 @@ function ContainerHeader({
   isCollapsed,
   isSelected,
   isMultiSelected,
+  isRoot,
   onToggle,
   onSelect,
+  onDelete,
 }: ContainerHeaderProps) {
   const childCount = node.children.length;
   const badgeColor = LAYOUT_BADGE_COLORS[node.layout] || 'bg-gray-700 text-gray-300';
@@ -254,7 +265,7 @@ function ContainerHeader({
   return (
     <div
       style={{ paddingLeft: depth * INDENT_PX + 8 }}
-      className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer select-none border border-transparent ${selectionClass}`}
+      className={`group flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer select-none border border-transparent ${selectionClass}`}
       onClick={onSelect}
     >
       {/* Collapse toggle */}
@@ -315,6 +326,11 @@ function ContainerHeader({
       <span className="text-xs text-gray-600 ml-auto">
         {childCount} {childCount === 1 ? 'child' : 'children'}
       </span>
+
+      {/* Inline delete icon (hidden on root) */}
+      {!isRoot && onDelete && (
+        <DeleteIconButton onClick={onDelete} label="Delete container" />
+      )}
     </div>
   );
 }
@@ -325,9 +341,10 @@ interface WindowRowProps {
   isSelected: boolean;
   isMultiSelected: boolean;
   onSelect: (e: React.MouseEvent) => void;
+  onDelete?: () => void;
 }
 
-function WindowRow({ node, depth, isSelected, isMultiSelected, onSelect }: WindowRowProps) {
+function WindowRow({ node, depth, isSelected, isMultiSelected, onSelect, onDelete }: WindowRowProps) {
   const selectionClass = isSelected
     ? 'bg-blue-900/40 border-blue-700'
     : isMultiSelected
@@ -337,7 +354,7 @@ function WindowRow({ node, depth, isSelected, isMultiSelected, onSelect }: Windo
   return (
     <div
       style={{ paddingLeft: depth * INDENT_PX + 8 }}
-      className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer select-none border border-transparent ${selectionClass}`}
+      className={`group flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer select-none border border-transparent ${selectionClass}`}
       onClick={onSelect}
     >
       {/* Spacer to align with container toggle button */}
@@ -372,7 +389,43 @@ function WindowRow({ node, depth, isSelected, isMultiSelected, onSelect }: Windo
       {isMultiSelected && (
         <span className="text-[10px] text-blue-400 ml-auto">selected</span>
       )}
+
+      {/* Inline delete icon */}
+      {onDelete && (
+        <span className={isMultiSelected ? '' : 'ml-auto'}>
+          <DeleteIconButton onClick={onDelete} label="Delete window" />
+        </span>
+      )}
     </div>
+  );
+}
+
+/**
+ * Small trash icon button, hidden by default and revealed on row hover
+ * (requires the parent row to have the `group` class).
+ */
+function DeleteIconButton({
+  onClick,
+  label,
+}: {
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="hidden group-hover:inline-flex items-center justify-center w-5 h-5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 flex-shrink-0"
+      aria-label={label}
+      title={label}
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M6.5 1.75a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75V2h3.25a.75.75 0 010 1.5H13v9.25A2.25 2.25 0 0110.75 15h-5.5A2.25 2.25 0 013 12.75V3.5h-.25a.75.75 0 010-1.5H6.5v-.25zm-2 1.75v9.25c0 .414.336.75.75.75h5.5a.75.75 0 00.75-.75V3.5h-7zm2.25 2a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 01.75-.75zm2.5 0a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 01.75-.75z" />
+      </svg>
+    </button>
   );
 }
 

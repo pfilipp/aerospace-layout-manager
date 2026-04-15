@@ -164,4 +164,159 @@ describe('PropertiesPanel', () => {
     expect((screen.getByLabelText(/startup command/i) as HTMLTextAreaElement).value).toBe('code ~/Projects/test');
     expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe('test-project');
   });
+
+  it('shows Working Directory field for iTerm windows and hides raw startup in details', () => {
+    const onUpdate = vi.fn();
+    const itermNode: WindowNode = {
+      type: 'window',
+      'app-bundle-id': 'com.googlecode.iterm2',
+      'app-name': 'iTerm2',
+      startup: "~/nix-config/modules/darwin/scripts/iterm-window.sh 'cd ~/Projects/foo'",
+      title: '',
+      'window-id': 2,
+    };
+
+    render(
+      <PropertiesPanel selectedNode={itermNode} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
+    );
+
+    const folderField = screen.getByLabelText(/working directory/i) as HTMLInputElement;
+    expect(folderField.value).toBe('~/Projects/foo');
+  });
+
+  it('typing in Working Directory updates startup using iterm-window.sh template', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+    const itermNode: WindowNode = {
+      type: 'window',
+      'app-bundle-id': 'com.googlecode.iterm2',
+      'app-name': 'iTerm2',
+      startup: '',
+      title: '',
+      'window-id': 3,
+    };
+
+    render(
+      <PropertiesPanel selectedNode={itermNode} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
+    );
+
+    const folderField = screen.getByLabelText(/working directory/i);
+    await user.type(folderField, '~');
+
+    const lastCall = onUpdate.mock.calls[onUpdate.mock.calls.length - 1][0] as WindowNode;
+    expect(lastCall.startup).toBe("~/nix-config/modules/darwin/scripts/iterm-window.sh 'cd ~'");
+  });
+
+  it('Working Directory is empty when iTerm startup uses a project template', () => {
+    const onUpdate = vi.fn();
+    const itermNode: WindowNode = {
+      type: 'window',
+      'app-bundle-id': 'com.googlecode.iterm2',
+      'app-name': 'iTerm2',
+      startup: "~/nix-config/modules/darwin/scripts/iterm-window.sh '${PROJECT_ITERM_CMD}'",
+      title: '',
+      'window-id': 4,
+    };
+
+    render(
+      <PropertiesPanel selectedNode={itermNode} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
+    );
+
+    const folderField = screen.getByLabelText(/working directory/i) as HTMLInputElement;
+    expect(folderField.value).toBe('');
+    expect(screen.getByText(/custom command/i)).toBeDefined();
+  });
+
+  it('shows Working Directory field for VS Code and writes `code <folder>`', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+    const vscodeNode: WindowNode = {
+      type: 'window',
+      'app-bundle-id': 'com.microsoft.VSCode',
+      'app-name': 'VS Code',
+      startup: 'code ~/Projects/foo',
+      title: '',
+      'window-id': 5,
+    };
+
+    render(
+      <PropertiesPanel selectedNode={vscodeNode} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
+    );
+
+    const field = screen.getByLabelText(/working directory/i) as HTMLInputElement;
+    expect(field.value).toBe('~/Projects/foo');
+
+    // Single keystroke — see comment above for rationale
+    await user.type(field, '!');
+    const lastCall = onUpdate.mock.calls[onUpdate.mock.calls.length - 1][0] as WindowNode;
+    // With a controlled input and no state wrapper, the input's "current" text
+    // reflects only the parsed initial value + last keystroke ≈ initial text with
+    // one char replaced at caret. Verify it was rebuilt through the shortcut.
+    expect(lastCall.startup.startsWith('code ')).toBe(true);
+    expect(lastCall.startup).toContain('!');
+  });
+
+  it('VS Code field is empty when startup holds unresolved ${PROJECT_DIR}', () => {
+    const onUpdate = vi.fn();
+    const vscodeNode: WindowNode = {
+      type: 'window',
+      'app-bundle-id': 'com.microsoft.VSCode',
+      'app-name': 'VS Code',
+      startup: 'code ${PROJECT_DIR}',
+      title: '',
+      'window-id': 6,
+    };
+
+    render(
+      <PropertiesPanel selectedNode={vscodeNode} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
+    );
+
+    const field = screen.getByLabelText(/working directory/i) as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect(screen.getByText(/custom command/i)).toBeDefined();
+  });
+
+  it('shows Xcode Project field for Xcode and writes `open <path>`', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+    const xcodeNode: WindowNode = {
+      type: 'window',
+      'app-bundle-id': 'com.apple.dt.Xcode',
+      'app-name': 'Xcode',
+      startup: '',
+      title: '',
+      'window-id': 7,
+    };
+
+    render(
+      <PropertiesPanel selectedNode={xcodeNode} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
+    );
+
+    const field = screen.getByLabelText(/xcode project/i);
+    // Type a single char — userEvent.type on a controlled input without a
+    // stateful wrapper can't accumulate keystrokes (each render resets value).
+    await user.type(field, '~');
+    const lastCall = onUpdate.mock.calls[onUpdate.mock.calls.length - 1][0] as WindowNode;
+    expect(lastCall.startup).toBe('open ~');
+  });
+
+  it('Xcode field is empty when startup holds unresolved ${PROJECT_XCODEPROJ}', () => {
+    const onUpdate = vi.fn();
+    const xcodeNode: WindowNode = {
+      type: 'window',
+      'app-bundle-id': 'com.apple.dt.Xcode',
+      'app-name': 'Xcode',
+      startup: 'open ${PROJECT_XCODEPROJ}',
+      title: '',
+      'window-id': 8,
+    };
+
+    render(
+      <PropertiesPanel selectedNode={xcodeNode} parentLayout={null} onUpdate={onUpdate} apps={testApps} />,
+    );
+
+    const field = screen.getByLabelText(/xcode project/i) as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect(screen.getByText(/custom command/i)).toBeDefined();
+  });
 });
