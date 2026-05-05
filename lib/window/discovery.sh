@@ -83,7 +83,10 @@ create_window_mapping() {
     done <<< "$windows"
 
     # Pass 2: Launch missing windows via staging workspace
-    if [[ ${#missing_launchable[@]} -gt 0 ]]; then
+    if [[ "${SKIP_STARTUP:-0}" == "1" && ${#missing_launchable[@]} -gt 0 ]]; then
+        log "Skipping startup for ${#missing_launchable[@]} missing window(s) (--skip-startup)"
+    fi
+    if [[ ${#missing_launchable[@]} -gt 0 && "${SKIP_STARTUP:-0}" != "1" ]]; then
         log "Launching ${#missing_launchable[@]} missing window(s) via staging workspace..."
 
         for window_info in "${missing_launchable[@]}"; do
